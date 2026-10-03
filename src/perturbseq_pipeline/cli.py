@@ -793,6 +793,7 @@ def run_pipeline(
     from . import enrichment as enrich_mod
     from . import guides as guides_mod
     from . import io as io_mod
+    from . import knockdown_filter as kd_mod
     from . import lochness as loch_mod
     from . import meta as meta_mod
     from . import modules as modules_mod
@@ -1247,6 +1248,11 @@ def run_pipeline(
         cfg,
     )
 
+    # Knockdown mask: marks cells in obs, removes none, so stage 5 still sees
+    # every cell. Computed before the assigned_only split so both objects carry it.
+    kd_table = None
+    if cfg.knockdown_filter.enabled:
+        expr, kd_table = kd_mod.compute_knockdown_mask(expr, cfg)
 
     singlets = (
         _assigned_singlet_mask(
@@ -1476,6 +1482,19 @@ def run_pipeline(
             results.skipped,
             large_mode=large_mode,
             max_rows_large=cfg.scaling.report_preview_rows,
+        )
+
+    if kd_table is not None:
+        expr, kd_table = kd_mod.attach_perturbation_strength(expr, kd_table, results)
+        tables["knockdown_filter"] = kd_table
+        _write_table("knockdown_filter", kd_table, tabledir, table_paths)
+        targeting = expr.obs[guides_mod.OBS_CLASS].astype(str) == guides_mod.CLASS_TARGETING
+        n_marked = int((targeting & ~expr.obs[kd_mod.OBS_KD_KEEP]).sum())
+        warnings.append(
+            f"Knockdown mask (knockdown_filter.mode: {cfg.knockdown_filter.mode}): "
+            f"{n_marked:,} of {int(targeting.sum()):,} targeting cells are marked "
+            f"obs['{kd_mod.OBS_KD_KEEP}'] == False. No cells were removed; every "
+            f"analysis in this report uses all cells. See tables/knockdown_filter.csv."
         )
 
     plots_mod.plot_perturbation_overview(

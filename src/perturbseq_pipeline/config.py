@@ -598,6 +598,54 @@ class PerturbationConfig:
 
 
 # ===========================================================================
+# Knockdown filter
+# ===========================================================================
+
+
+@dataclass
+class KnockdownFilterConfig:
+    """Knockdown-efficiency mask over targeting cells.
+
+    Marks cells in ``obs['kd_keep']`` / ``obs['kd_status']`` and never removes
+    any, so perturbation strength is still estimated on every cell and the mask
+    and the continuous estimates travel together in the outputs. Each targeting
+    cell gets ``obs['kd_ratio']``: its target's normalized expression over the
+    mean in non-targeting cells of the same context.
+
+    Steps, applied per group: (1) the group passes when its median ratio is
+    below ``max_median_ratio``; (2) in a passing group, cells at or above
+    ``max_cell_ratio`` are marked as escapers; (3) groups with fewer than
+    ``min_cells`` cells are ``non_testable`` and left unmarked.
+    """
+
+    enabled: bool = False
+    #: ``pooled`` (one group per target, all contexts together);
+    #: ``per_context`` (one group per target and context — most conservative);
+    #: ``any_context`` (a target passing step 1 in at least one context has
+    #: step 2 applied in its passing contexts and keeps every cell elsewhere).
+    mode: str = "pooled"
+    #: ``obs`` column defining the context (e.g. ``cell_line`` / ``condition``
+    #: from the sample metadata). Required for ``per_context`` / ``any_context``.
+    #: In ``pooled`` mode it sets the per-context control baseline; null uses
+    #: one baseline over all cells.
+    context_key: Optional[str] = None
+    #: Step 1: median ratio of the group must be below this.
+    max_median_ratio: float = 0.3
+    #: Step 1 threshold in ``any_context`` mode; null uses ``max_median_ratio``.
+    max_median_ratio_any: Optional[float] = None
+    #: Step 2: a cell's own ratio must be below this.
+    max_cell_ratio: float = 0.5
+    #: Step 3: groups with fewer cells are marked ``non_testable``, not filtered.
+    min_cells: int = 30
+    #: Contexts with fewer non-targeting cells have no baseline: ``non_testable``.
+    min_control_cells: int = 10
+    #: Targets detected in fewer than this percent of the context's control
+    #: cells are marked for filtering: with mostly-zero counts every cell would
+    #: pass the ratio cut through dropout alone.
+    min_pct_expressing_control: float = 10.0
+
+
+# ===========================================================================
 # Cluster enrichment
 # ===========================================================================
 
@@ -1449,6 +1497,10 @@ class Config:
         default_factory=PerturbationConfig
     )
 
+    knockdown_filter: KnockdownFilterConfig = field(
+        default_factory=KnockdownFilterConfig
+    )
+
     enrichment: EnrichmentConfig = field(
         default_factory=EnrichmentConfig
     )
@@ -1955,6 +2007,30 @@ class Config:
 
             raise ValueError(
                 "perturbation.umap_background_fraction must be in (0, 1]"
+            )
+
+        # ==============================================================
+        # Knockdown filter
+        # ==============================================================
+
+        k = self.knockdown_filter
+        if k.mode not in ("pooled", "per_context", "any_context"):
+            raise ValueError(
+                "knockdown_filter.mode must be 'pooled', 'per_context' or "
+                f"'any_context' (got {k.mode!r})"
+            )
+        if k.enabled and k.mode in ("per_context", "any_context") and not k.context_key:
+            raise ValueError(f"knockdown_filter.mode {k.mode!r} needs knockdown_filter.context_key")
+        for fld in ("max_median_ratio", "max_median_ratio_any", "max_cell_ratio"):
+            val = getattr(k, fld)
+            if val is not None and val <= 0:
+                raise ValueError(f"knockdown_filter.{fld} must be > 0 (got {val!r})")
+        if k.min_cells < 1 or k.min_control_cells < 1:
+            raise ValueError("knockdown_filter.min_cells and min_control_cells must be >= 1")
+        if k.min_pct_expressing_control <= 0:
+            raise ValueError(
+                "knockdown_filter.min_pct_expressing_control must be > 0, otherwise a "
+                "control mean of zero makes the ratio undefined"
             )
 
         # ==============================================================

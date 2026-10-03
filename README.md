@@ -686,6 +686,46 @@ The same rule is applied when guides arrive as a barcode table
 (`input.guide_table`), reading the same two keys, so a run from a count matrix
 and a run from a barcode table produce identical per-cell calls.
 
+### Knockdown mask
+
+`knockdown_filter` marks targeting cells whose own target is not knocked down.
+It **removes nothing**: every analysis still runs on all cells, so section 3's
+perturbation strength stays an independent estimate. The mask and those
+estimates are written side by side for the final filtering:
+
+| Where | Contents |
+|---|---|
+| `obs['kd_ratio']` | target expression / mean in non-targeting cells of the same context |
+| `obs['kd_status']` | `knockdown`, `escaper`, `failed_median`, `low_control_expression`, `not_measured`, `non_testable`, `unfiltered_context`, `control`, `untouched` |
+| `obs['kd_keep']` | False for the marked statuses (`escaper`, `failed_median`, `low_control_expression`, `not_measured`) |
+| `obs['pert_log2fc_ntc']`, `pert_ks_fdr_ntc`, … | section-3 estimates for the cell's target |
+| `tables/knockdown_filter.csv` | one row per target × context, with both views |
+
+Per group: (1) pass if the median `kd_ratio` < `max_median_ratio`; (2) in a
+passing group, mark cells with `kd_ratio` >= `max_cell_ratio` as escapers;
+(3) groups under `min_cells` are `non_testable` and left unmarked. `mode` sets
+the group: `pooled` (per target, cell-weighted median across contexts),
+`per_context` (per target × context), or `any_context` (step 1 per context with
+`max_median_ratio_any`; a target that passes anywhere is filtered only in its
+passing contexts and keeps every cell elsewhere). The control baseline is per
+context in every mode whenever `context_key` is set.
+
+The default is `mode: pooled` with `context_key: null`: one baseline over all
+control cells and one group per target, so `enabled: true` runs as is. With
+several cell lines or conditions, set `context_key` and, if knockdown may
+differ between them, `mode: per_context`:
+
+```yaml
+knockdown_filter:
+  enabled: true
+  mode: per_context
+  context_key: cell_line
+```
+
+```python
+final = adata[adata.obs["kd_keep"] & (adata.obs["perturbation_class"] != "ambiguous")]
+```
+
 Non-targeting guides are detected by pattern (`non`, `non_targeting`, `NTC`,
 `scramble`, …) via `guides.ntc_patterns` and used as the preferred control group.
 
