@@ -612,8 +612,8 @@ class KnockdownFilterConfig:
     cell gets ``obs['kd_ratio']``: its target's normalized expression over the
     mean in non-targeting cells of the same context.
 
-    Steps, applied per group: (1) the group passes when its median ratio is
-    below ``max_median_ratio``; (2) in a passing group, cells at or above
+    Steps, applied per group: (1) the group passes when its mean ratio is
+    below ``max_mean_ratio``; (2) in a passing group, cells at or above
     ``max_cell_ratio`` are marked as escapers; (3) groups with fewer than
     ``min_cells`` cells are ``non_testable`` and left unmarked.
     """
@@ -629,10 +629,10 @@ class KnockdownFilterConfig:
     #: In ``pooled`` mode it sets the per-context control baseline; null uses
     #: one baseline over all cells.
     context_key: Optional[str] = None
-    #: Step 1: median ratio of the group must be below this.
-    max_median_ratio: float = 0.3
-    #: Step 1 threshold in ``any_context`` mode; null uses ``max_median_ratio``.
-    max_median_ratio_any: Optional[float] = None
+    #: Step 1: mean ratio of the group must be below this.
+    max_mean_ratio: float = 0.3
+    #: Step 1 threshold in ``any_context`` mode; null uses ``max_mean_ratio``.
+    max_mean_ratio_any: Optional[float] = None
     #: Step 2: a cell's own ratio must be below this.
     max_cell_ratio: float = 0.5
     #: Step 3: groups with fewer cells are marked ``non_testable``, not filtered.
@@ -2021,7 +2021,7 @@ class Config:
             )
         if k.enabled and k.mode in ("per_context", "any_context") and not k.context_key:
             raise ValueError(f"knockdown_filter.mode {k.mode!r} needs knockdown_filter.context_key")
-        for fld in ("max_median_ratio", "max_median_ratio_any", "max_cell_ratio"):
+        for fld in ("max_mean_ratio", "max_mean_ratio_any", "max_cell_ratio"):
             val = getattr(k, fld)
             if val is not None and val <= 0:
                 raise ValueError(f"knockdown_filter.{fld} must be > 0 (got {val!r})")

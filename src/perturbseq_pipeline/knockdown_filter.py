@@ -16,8 +16,11 @@ context with a naturally lower baseline cannot pass for a knockdown.
 Per group — (target, context) in ``per_context`` / ``any_context``, target in
 ``pooled`` — the filter then runs:
 
-1. the group passes when the median ``kd_ratio`` of its cells is below
-   ``max_median_ratio``;
+1. the group passes when the mean ``kd_ratio`` of its cells is below
+   ``max_mean_ratio``. The baseline is constant within a context, so this is
+   the ratio of mean target-cell to mean control expression. A median would
+   be 0 for any target detected in under half of the cells, knockdown or not;
+   the mean counts dropout zeros the same way in both groups;
 2. in a passing group, cells whose own ratio is at or above ``max_cell_ratio``
    are marked as escapers;
 3. a group with fewer than ``min_cells`` cells is ``non_testable`` and left
@@ -61,7 +64,7 @@ STATUS_KNOCKDOWN = "knockdown"
 STATUS_NON_TESTABLE = "non_testable"
 STATUS_UNFILTERED_CONTEXT = "unfiltered_context"  # any_context, failing context
 STATUS_ESCAPER = "escaper"
-STATUS_FAILED_MEDIAN = "failed_median"
+STATUS_FAILED_GROUP = "failed_group"
 STATUS_LOW_EXPRESSION = "low_control_expression"
 STATUS_NOT_MEASURED = "not_measured"
 
@@ -74,7 +77,7 @@ KEEP_STATUSES = (
 )
 ALL_STATUSES = KEEP_STATUSES + (
     STATUS_ESCAPER,
-    STATUS_FAILED_MEDIAN,
+    STATUS_FAILED_GROUP,
     STATUS_LOW_EXPRESSION,
     STATUS_NOT_MEASURED,
 )
@@ -133,10 +136,10 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
     klass = obs[OBS_CLASS].astype(str).to_numpy()
     contexts = _contexts(expr, cfg)
     context_values = sorted(set(contexts))
-    median_cut = (
-        kcfg.max_median_ratio_any
-        if kcfg.mode == "any_context" and kcfg.max_median_ratio_any is not None
-        else kcfg.max_median_ratio
+    mean_cut = (
+        kcfg.max_mean_ratio_any
+        if kcfg.mode == "any_context" and kcfg.max_mean_ratio_any is not None
+        else kcfg.max_mean_ratio
     )
 
     ntc = klass == CLASS_NTC
@@ -173,7 +176,7 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
                 "n_control": int(ctrl.sum()),
                 "control_mean": np.nan,
                 "pct_control_expressing": np.nan,
-                "median_ratio": np.nan,
+                "mean_ratio": np.nan,
                 "_cells": cells,
             }
             if x is None:
@@ -190,14 +193,14 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
                     row["group_status"] = STATUS_LOW_EXPRESSION
                 else:
                     ratio[cells] = x[cells] / mean
-                    row["median_ratio"] = float(np.median(ratio[cells]))
+                    row["mean_ratio"] = float(np.mean(ratio[cells]))
                     row["group_status"] = "ok"
             gene_rows.append(row)
 
         if kcfg.mode == "pooled":
-            _decide_pooled(gene_rows, status, ratio, kcfg, median_cut)
+            _decide_pooled(gene_rows, status, ratio, kcfg, mean_cut)
         else:
-            _decide_per_context(gene_rows, status, ratio, kcfg, median_cut)
+            _decide_per_context(gene_rows, status, ratio, kcfg, mean_cut)
         rows.extend(gene_rows)
 
     for row in rows:
@@ -232,7 +235,7 @@ def _decide_per_context(
     status: np.ndarray,
     ratio: np.ndarray,
     kcfg,
-    median_cut: float,
+    mean_cut: float,
 ) -> None:
     """``per_context`` and ``any_context``: steps 1-3 on each (target, context)."""
     testable = []
@@ -243,22 +246,22 @@ def _decide_per_context(
             row["group_status"] = STATUS_NON_TESTABLE
             row["reason"] = f"fewer than {kcfg.min_cells} cells"
             continue
-        row["group_median_ratio"] = row["median_ratio"]
-        row["passed_median"] = bool(row["median_ratio"] < median_cut)
+        row["group_mean_ratio"] = row["mean_ratio"]
+        row["passed_group"] = bool(row["mean_ratio"] < mean_cut)
         testable.append(row)
 
-    any_passed = any(row["passed_median"] for row in testable)
+    any_passed = any(row["passed_group"] for row in testable)
     for row in testable:
         cells = row["_cells"]
-        if row["passed_median"]:
+        if row["passed_group"]:
             row["group_status"] = "pass"
             _mark_group(status, ratio, cells, kcfg.max_cell_ratio)
         elif kcfg.mode == "any_context" and any_passed:
             row["group_status"] = STATUS_UNFILTERED_CONTEXT
             status[cells] = STATUS_UNFILTERED_CONTEXT
         else:
-            row["group_status"] = STATUS_FAILED_MEDIAN
-            status[cells] = STATUS_FAILED_MEDIAN
+            row["group_status"] = STATUS_FAILED_GROUP
+            status[cells] = STATUS_FAILED_GROUP
 
 
 def _decide_pooled(
@@ -266,12 +269,12 @@ def _decide_pooled(
     status: np.ndarray,
     ratio: np.ndarray,
     kcfg,
-    median_cut: float,
+    mean_cut: float,
 ) -> None:
     """``pooled``: one group per target over every context with a baseline.
 
-    The median is taken over the pooled per-cell ratios, so contexts are
-    weighted by their cell count; the per-context medians stay in the table.
+    The mean is taken over the pooled per-cell ratios, so contexts are
+    weighted by their cell count; the per-context means stay in the table.
     """
     ok = [row for row in gene_rows if row["group_status"] == "ok"]
     if not ok:
@@ -283,16 +286,16 @@ def _decide_pooled(
             row["group_status"] = STATUS_NON_TESTABLE
             row["reason"] = f"fewer than {kcfg.min_cells} cells pooled"
         return
-    pooled_median = float(np.median(ratio[cells]))
-    passed = bool(pooled_median < median_cut)
+    pooled_mean = float(np.mean(ratio[cells]))
+    passed = bool(pooled_mean < mean_cut)
     for row in ok:
-        row["group_median_ratio"] = pooled_median
-        row["passed_median"] = passed
-        row["group_status"] = "pass" if passed else STATUS_FAILED_MEDIAN
+        row["group_mean_ratio"] = pooled_mean
+        row["passed_group"] = passed
+        row["group_status"] = "pass" if passed else STATUS_FAILED_GROUP
     if passed:
         _mark_group(status, ratio, cells, kcfg.max_cell_ratio)
     else:
-        status[cells] = STATUS_FAILED_MEDIAN
+        status[cells] = STATUS_FAILED_GROUP
 
 
 def attach_perturbation_strength(

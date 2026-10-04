@@ -92,14 +92,14 @@ def test_per_context_filters_each_context_independently(adata):
     a, table = _run(adata, mode="per_context", context_key="cell_line")
     assert a.n_obs == adata.n_obs  # a mask, never a filter
     assert _statuses(a, "G1", "A") == {"knockdown": 50, "escaper": 10}
-    assert _statuses(a, "G1", "B") == {"failed_median": 30}
+    assert _statuses(a, "G1", "B") == {"failed_group": 30}
     assert _statuses(a, "G2") == {"non_testable": 5}
     assert _statuses(a, "G3") == {"low_control_expression": 40}
     assert _statuses(a, "G4") == {"not_measured": 35}
-    assert _statuses(a, "G5") == {"failed_median": 40}
+    assert _statuses(a, "G5") == {"failed_group": 40}
 
     row = table.set_index(["target_gene", "context"]).loc[("G1", "A")]
-    assert row["median_ratio"] == pytest.approx(0.1)
+    assert row["mean_ratio"] == pytest.approx((50 * 0.1 + 10 * 1.0) / 60)
     assert row["n_kept"] == 50 and row["n_escaper"] == 10
 
 
@@ -109,22 +109,22 @@ def test_any_context_keeps_every_cell_in_failing_contexts(adata):
     assert _statuses(a, "G1", "B") == {"unfiltered_context": 30}
     assert a.obs.loc[(a.obs["target_gene"] == "G1") & (a.obs["cell_line"] == "B"), OBS_KD_KEEP].all()
     # G5 passes nowhere, so it is marked like in per_context.
-    assert _statuses(a, "G5") == {"failed_median": 40}
+    assert _statuses(a, "G5") == {"failed_group": 40}
 
 
 def test_any_context_uses_the_stricter_threshold(adata):
-    a, _ = _run(adata, mode="any_context", context_key="cell_line", max_median_ratio_any=0.05)
-    assert _statuses(a, "G1") == {"failed_median": 90}
+    a, _ = _run(adata, mode="any_context", context_key="cell_line", max_mean_ratio_any=0.05)
+    assert _statuses(a, "G1") == {"failed_group": 90}
 
 
-def test_pooled_median_uses_per_context_baselines(adata):
+def test_pooled_mean_uses_per_context_baselines(adata):
     a, table = _run(adata, mode="pooled", context_key="cell_line")
-    # 50 of 90 G1 cells sit at ratio 0.1, so the pooled median passes and step 2
-    # then applies to B as well.
-    assert _statuses(a, "G1") == {"knockdown": 50, "escaper": 40}
-    assert np.allclose(table.loc[table["target_gene"] == "G1", "group_median_ratio"], 0.1)
+    # Pooled over A and B, G1's mean ratio is (50 * 0.1 + 40 * 1.0) / 90 = 0.5:
+    # context B, where G1 is not knocked down at all, pulls the target over the cut.
+    assert _statuses(a, "G1") == {"failed_group": 90}
+    assert np.allclose(table.loc[table["target_gene"] == "G1", "group_mean_ratio"], 0.5)
     # G5 is at its own context's baseline: not a knockdown.
-    assert _statuses(a, "G5") == {"failed_median": 40}
+    assert _statuses(a, "G5") == {"failed_group": 40}
 
 
 def test_pooled_without_context_is_fooled_by_baseline_differences(adata):
@@ -133,6 +133,25 @@ def test_pooled_without_context_is_fooled_by_baseline_differences(adata):
     a, _ = _run(adata, mode="pooled", context_key=None)
     assert _statuses(a, "G5") == {"knockdown": 40}
     assert a.obs.loc[a.obs["target_gene"] == "G5", OBS_KD_RATIO].iloc[0] == pytest.approx(2 / 11)
+
+
+def test_dropout_alone_does_not_pass_as_knockdown():
+    """A target detected in 30% of controls, and not knocked down: 70% of its
+    cells are zero, so the median ratio would be 0 and pass. The mean is 1."""
+    detected = [3.0] * 12 + [0.0] * 28
+    values = np.array([[v] for v in detected * 2])
+    obs = pd.DataFrame(
+        {
+            "target_gene": ["non-targeting"] * 40 + ["G6"] * 40,
+            "perturbation_class": ["non-targeting"] * 40 + ["targeting"] * 40,
+        },
+        index=[f"cell{i}" for i in range(80)],
+    )
+    a = ad.AnnData(X=sp.csr_matrix(values), obs=obs, var=pd.DataFrame(index=["G6"]))
+    a.layers[LOGNORM_LAYER] = sp.csr_matrix(np.log1p(values))
+    a, table = _run(a)
+    assert table.loc[0, "mean_ratio"] == pytest.approx(1.0)
+    assert _statuses(a, "G6") == {"failed_group": 40}
 
 
 def test_controls_and_ambiguous_cells_are_never_marked(adata):
@@ -188,5 +207,5 @@ def test_pipeline_writes_the_mask_without_removing_cells(tmp_path):
     for t in KD_TARGETS:
         assert by_target[t] == {"pass"}
     for t in NULL_TARGETS:
-        assert by_target[t] == {"failed_median"}
+        assert by_target[t] == {"failed_group"}
     assert table["log2fc_ntc"].notna().all()

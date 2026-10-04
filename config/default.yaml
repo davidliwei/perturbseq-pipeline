@@ -189,8 +189,8 @@ knockdown_filter:
   enabled: false
   mode: pooled
   context_key: null
-  max_median_ratio: 0.3
-  max_median_ratio_any: null
+  max_mean_ratio: 0.3
+  max_mean_ratio_any: null
   max_cell_ratio: 0.5
   min_cells: 30
   min_control_cells: 10
