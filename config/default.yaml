@@ -185,6 +185,20 @@ perturbation:
   max_log2fc_for_hit: 0.0
   top_n_report: 12
   umap_background_fraction: 0.1
+knockdown_filter:
+  enabled: false
+  mode: pooled
+  context_key: null
+  max_mean_ratio: 0.3
+  max_mean_ratio_any: null
+  max_cell_ratio: 0.5
+  min_cells: 30
+  min_control_cells: 10
+  min_pct_expressing_control: 10.0
+  method: mean_ratio
+  max_rho: 0.3
+  max_escaper_fraction: 0.5
+  min_escaper_prob: 0.9
 enrichment:
   enabled: true
   cluster_key: leiden

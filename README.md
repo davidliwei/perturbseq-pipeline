@@ -686,6 +686,71 @@ The same rule is applied when guides arrive as a barcode table
 (`input.guide_table`), reading the same two keys, so a run from a count matrix
 and a run from a barcode table produce identical per-cell calls.
 
+### Knockdown mask
+
+`knockdown_filter` marks targeting cells whose own target is not knocked down.
+It **removes nothing**: every analysis still runs on all cells, so section 3's
+perturbation strength stays an independent estimate. The mask and those
+estimates are written side by side for the final filtering:
+
+| Where | Contents |
+|---|---|
+| `obs['kd_ratio']` | target expression / mean in non-targeting cells of the same context |
+| `obs['kd_status']` | `knockdown`, `escaper`, `failed_group`, `low_control_expression`, `not_measured`, `non_testable`, `unfiltered_context`, `control`, `untouched` |
+| `obs['kd_keep']` | False for the marked statuses (`escaper`, `failed_group`, `low_control_expression`, `not_measured`) |
+| `obs['pert_log2fc_ntc']`, `pert_ks_fdr_ntc`, … | section-3 estimates for the cell's target |
+| `tables/knockdown_filter.csv` | one row per target × context, with both views |
+
+Per group: (1) pass if the mean `kd_ratio` < `max_mean_ratio`, i.e. mean
+target-cell over mean control expression (a median would be 0 for any target
+detected in under half of the cells, knockdown or not); (2) in a passing group,
+mark cells with `kd_ratio` >= `max_cell_ratio` as escapers; (3) groups under
+`min_cells` are `non_testable` and left unmarked. `mode` sets the group:
+`pooled` (per target, cell-weighted mean across contexts), `per_context` (per
+target × context), or `any_context` (step 1 per context with
+`max_mean_ratio_any`; a target that passes anywhere is filtered only in its
+passing contexts and keeps every cell elsewhere). The control baseline is per
+context in every mode whenever `context_key` is set.
+
+The default is `mode: pooled` with `context_key: null`: one baseline over all
+control cells and one group per target, so `enabled: true` runs as is. With
+several cell lines or conditions, set `context_key` and, if knockdown may
+differ between them, `mode: per_context`:
+
+```yaml
+knockdown_filter:
+  enabled: true
+  mode: per_context
+  context_key: cell_line
+```
+
+```python
+final = adata[adata.obs["kd_keep"] & (adata.obs["perturbation_class"] != "ambiguous")]
+```
+
+`method: count_model` replaces steps 1-2 with a negative-binomial mixture on
+the target's raw counts (`layers['counts']`; the run stops if the first 10,000
+cells of that layer are not non-negative integers). Each target cell is either
+unperturbed (an escaper), with the mean and overdispersion of its context's
+controls scaled by its library size, or knocked down to a fraction `rho` of
+that mean. Maximum likelihood fits `rho` and the escaper fraction per group. The group passes
+when `rho < max_rho`, so escapers no longer dilute the test, and the escaper
+fraction is below `max_escaper_fraction` (0.5: most cells must be knocked down;
+without it, a group with no knockdown can be fitted as a near-zero majority plus
+escapers, which passed 1.7% of null groups built from Nadig control cells), and a cell is an
+escaper when `obs['kd_escaper_prob']` reaches `min_escaper_prob`. The table
+gains `rho`, `escaper_fraction`, `control_mean_counts` and `control_dispersion`.
+The dispersion is shared across genes as in DESeq2: each gene's estimate from
+its context's controls is shrunk toward a trend over all genes, weighted by how
+noisy it is (measured by splitting the controls in half). This helps when a
+context has few controls (about 20-35% lower error at 30-100 cells in
+simulation) and changes little with thousands.
+The ratio cut calls every cell with a single count an escaper when the target is
+weakly expressed. The count model does not: a single count is weak evidence,
+so the posterior stays near the escaper fraction and such cells are left as
+knockdowns. The posterior is calibrated but conservative: when escaper and
+knocked-down counts overlap, many escapers stay below the 0.9 cut.
+
 Non-targeting guides are detected by pattern (`non`, `non_targeting`, `NTC`,
 `scramble`, …) via `guides.ntc_patterns` and used as the preferred control group.
 
