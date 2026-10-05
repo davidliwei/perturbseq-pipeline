@@ -30,6 +30,23 @@ Per group — (target, context) in ``per_context`` / ``any_context``, target in
 context has step 2 applied in its passing contexts only and keeps every cell in
 the rest. A target passing nowhere is marked everywhere it was testable.
 
+``method: count_model`` replaces steps 1 and 2 with a two-component count
+model on the raw counts of the target gene (``layers['counts']``). Cell ``i``
+with library-size factor ``s_i`` in context ``c`` is
+
+    x_i ~ pi * NB(mu_c * s_i, phi_c) + (1 - pi) * NB(rho * mu_c * s_i, phi_c)
+
+where ``mu_c`` and ``phi_c`` (mean per unit library size and overdispersion)
+come from the non-targeting cells of ``c``, with ``phi_c`` shared across genes
+(see ``_control_fit``); ``pi`` (escaper fraction) and
+``rho`` (expression left in knocked-down cells) are fitted per group by EM. The
+group passes when ``rho < max_rho``, so escapers do not dilute the test, and
+the escaper fraction is below ``max_escaper_fraction`` (a group with no
+knockdown can otherwise be fitted as a near-zero majority plus escapers); and a
+cell is an escaper when its posterior ``P(escaper | x_i)`` reaches
+``min_escaper_prob``. For a weakly expressed target one cell's count carries
+little information, the posterior stays near ``pi`` and no cell is marked.
+
 Non-targeting, ambiguous and unassigned cells are never marked.
 """
 
@@ -42,6 +59,8 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from scipy import sparse
+from scipy.optimize import least_squares
+from scipy.special import gammaln
 
 from .cluster import LOGNORM_LAYER
 from .config import Config
@@ -53,6 +72,11 @@ logger = logging.getLogger(__name__)
 OBS_KD_RATIO = "kd_ratio"
 OBS_KD_STATUS = "kd_status"
 OBS_KD_KEEP = "kd_keep"
+OBS_KD_ESCAPER_PROB = "kd_escaper_prob"  # count_model only
+
+#: Values of ``rho`` searched in the EM's M-step: expression left in
+#: knocked-down cells, from 1% of control to no knockdown at all.
+RHO_GRID = np.linspace(0.01, 1.0, 100)
 
 #: Context label when ``context_key`` is null.
 ALL_CONTEXTS = "all"
@@ -124,6 +148,144 @@ def _mark_group(
     status[cells] = np.where(ratio[cells] < max_cell_ratio, STATUS_KNOCKDOWN, STATUS_ESCAPER)
 
 
+# ---------------------------------------------------------------------------
+# count_model
+# ---------------------------------------------------------------------------
+
+
+def _raw_target_columns(expr: ad.AnnData, genes: List[str]) -> sparse.csc_matrix:
+    """Raw counts of ``genes``, one column each (same slicing as above)."""
+    sub = expr.layers["counts"][:, [expr.var_names.get_loc(g) for g in genes]]
+    return sparse.csc_matrix(sub, dtype=np.float64)
+
+
+def _size_factors(expr: ad.AnnData) -> np.ndarray:
+    """Library size of each cell over the median library size."""
+    library = np.asarray(expr.layers["counts"].sum(axis=1), dtype=np.float64).ravel()
+    return library / np.median(library)
+
+
+def _log_gene_wise_phi(counts: sparse.csr_matrix, s: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Mean per unit library size, and log of the method-of-moments ``phi``, per gene.
+
+    ``phi`` is estimated around each cell's expected count m = mu * s, with
+    Var(x) = m + phi * m^2. Underdispersed (Poisson-like) genes sit at a floor
+    of 1e-4 rather than at log(0); genes with no counts are NaN.
+    """
+    mu = np.asarray(counts.sum(axis=0), dtype=np.float64).ravel() / s.sum()
+    sum_x2 = np.asarray(counts.multiply(counts).sum(axis=0), dtype=np.float64).ravel()
+    sum_xs = np.asarray(counts.T @ s, dtype=np.float64).ravel()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        resid2 = sum_x2 - 2 * mu * sum_xs + mu**2 * np.sum(s**2)
+        phi = (resid2 - mu * s.sum()) / (mu**2 * np.sum(s**2))
+        return mu, np.log(np.maximum(phi, 1e-4))
+
+
+def _control_fit(counts: sparse.csr_matrix, s: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Per-gene mean and overdispersion in one context's controls, shared across genes.
+
+    ``counts`` holds every gene for the context's non-targeting cells. Gene-wise
+    ``phi`` is noisy when controls are few or counts low, so, as in DESeq2, its
+    log is shrunk toward a trend over genes, phi(mu) = a + b / mu, fitted
+    robustly on log scale, with a normal prior around the trend.
+
+    How far each gene is shrunk depends on how noisy its own estimate is. That
+    sampling variance is measured, not assumed: the controls are split in two
+    halves, and the squared difference between the halves' log phi, divided by
+    4, estimates the variance of the full-sample log phi. It is averaged within
+    10 bins of mean expression, because low-count genes are much noisier. The
+    prior variance is the genes' spread around the trend minus the average
+    sampling variance, at least 0.25 (DESeq2's floor), so genes that really
+    differ from the trend are not forced onto it.
+    """
+    mu, log_gene = _log_gene_wise_phi(counts, s)
+    expressed = np.isfinite(log_gene)
+    phi = np.full(mu.shape, np.nan)
+
+    halves = np.random.default_rng(0).permutation(counts.shape[0]) % 2 == 0
+    _, log_a = _log_gene_wise_phi(counts[halves], s[halves])
+    _, log_b = _log_gene_wise_phi(counts[~halves], s[~halves])
+    both = expressed & np.isfinite(log_a) & np.isfinite(log_b)
+    # Ten equal-count bins of mean expression (by rank, so ties in the mean, common
+    # with few controls, cannot leave a bin empty), interpolated between bin centres.
+    log_mu = np.log(mu[both])
+    half_diff2 = (log_a[both] - log_b[both]) ** 2
+    bins = np.array_split(np.argsort(log_mu), 10)
+    centres = np.array([np.median(log_mu[b]) for b in bins])
+    var_per_bin = np.array([np.mean(half_diff2[b]) / 4 for b in bins])
+    sampling_var = np.interp(np.log(mu[expressed]), centres, var_per_bin)
+
+    m, log_g = mu[expressed], log_gene[expressed]
+    # Fit the trend on genes with at least 0.1 counts per cell on average.
+    use = m * np.mean(s) >= 0.1
+    fit = least_squares(
+        lambda ab: np.log(ab[0] + ab[1] / m[use]) - log_g[use],
+        x0=[0.1, 0.1],
+        bounds=([1e-8, 0.0], [np.inf, np.inf]),
+        loss="soft_l1",
+    )
+    log_trend = np.log(fit.x[0] + fit.x[1] / m)
+
+    spread = float(np.var(log_g[use] - log_trend[use]))
+    prior_var = max(spread - float(np.mean(sampling_var[use])), 0.25)
+    # Precision-weighted average of gene-wise and trend; written with the weight on
+    # the gene so that a sampling variance of 0 (identical halves) gives weight 1.
+    gene_weight = prior_var / (prior_var + sampling_var)
+    log_phi = gene_weight * log_g + (1 - gene_weight) * log_trend
+    phi[expressed] = np.exp(log_phi)
+    return mu, phi
+
+
+def _nb_logpmf(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    """Negative-binomial log pmf with mean ``mean`` and Var = mean + phi * mean^2.
+
+    ``phi`` of 0 is the Poisson limit; it is evaluated as phi = 1e-8, where the
+    two agree to far below the precision that matters here.
+    """
+    r = 1.0 / np.maximum(phi, 1e-8)
+    return (
+        gammaln(x + r)
+        - gammaln(r)
+        - gammaln(x + 1)
+        - r * np.log1p(mean / r)
+        + x * np.log(mean / (r + mean))
+    )
+
+
+def _fit_mixture(
+    x: np.ndarray, mean: np.ndarray, phi: np.ndarray, max_iter: int = 200
+) -> Tuple[float, float, np.ndarray]:
+    """EM for ``rho`` and ``pi`` in one group; returns them and P(escaper) per cell.
+
+    ``mean`` and ``phi`` are each cell's unperturbed expectation, from its own
+    context's controls. The M-step for ``rho`` has no closed form under the
+    negative binomial, so it is a search over RHO_GRID; the escaper term does
+    not depend on ``rho`` and is computed once.
+    """
+    log_escaper = _nb_logpmf(x, mean, phi)
+    log_kd = _nb_logpmf(x[None, :], RHO_GRID[:, None] * mean[None, :], phi[None, :])
+    # A NaN here would make the rho search silently return the grid's first value
+    # (rho = 0.01) and pass a group with no knockdown.
+    if not (np.isfinite(log_escaper).all() and np.isfinite(log_kd).all()):
+        raise ValueError("count_model: non-finite likelihood; check control mean and dispersion")
+
+    # Start from "no escapers": the rho that best explains all cells.
+    rho_index = int(np.argmax(log_kd.sum(axis=1)))
+    pi = 0.1
+    for _ in range(max_iter):
+        log_e = np.log(pi) + log_escaper
+        log_k = np.log1p(-pi) + log_kd[rho_index]
+        p_escaper = np.exp(log_e - np.logaddexp(log_e, log_k))
+        # Keep pi strictly inside (0, 1) so both components stay in the model.
+        new_pi = float(np.clip(p_escaper.mean(), 1e-6, 1 - 1e-6))
+        new_rho_index = int(np.argmax(log_kd @ (1.0 - p_escaper)))
+        converged = new_rho_index == rho_index and abs(new_pi - pi) < 1e-6
+        pi, rho_index = new_pi, new_rho_index
+        if converged:
+            break
+    return float(RHO_GRID[rho_index]), pi, p_escaper
+
+
 def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, pd.DataFrame]:
     """Write ``kd_ratio`` / ``kd_status`` / ``kd_keep`` into ``obs``.
 
@@ -136,11 +298,11 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
     klass = obs[OBS_CLASS].astype(str).to_numpy()
     contexts = _contexts(expr, cfg)
     context_values = sorted(set(contexts))
-    mean_cut = (
-        kcfg.max_mean_ratio_any
-        if kcfg.mode == "any_context" and kcfg.max_mean_ratio_any is not None
-        else kcfg.max_mean_ratio
-    )
+    count_model = kcfg.method == "count_model"
+    if kcfg.mode == "any_context" and kcfg.max_mean_ratio_any is not None:
+        mean_cut = kcfg.max_mean_ratio_any
+    else:
+        mean_cut = kcfg.max_mean_ratio
 
     ntc = klass == CLASS_NTC
     targeting = klass == CLASS_TARGETING
@@ -152,6 +314,29 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
     measured = [g for g in all_targets if g in expr.var_names]
     columns = _linear_target_columns(expr, measured) if measured else None
     col_of = {g: j for j, g in enumerate(measured)}
+    if count_model:
+        counts = sparse.csr_matrix(expr.layers["counts"])
+        # The NB likelihood is only meaningful on raw counts. Normalized values
+        # run without error but give meaningless rho and escaper calls. The
+        # first 10,000 cells are enough to tell.
+        sample = counts[:10_000].data
+        if (sample < 0).any() or (sample != np.round(sample)).any():
+            raise ValueError(
+                "knockdown_filter.method=count_model needs raw counts "
+                "(non-negative integers) in layers['counts']"
+            )
+        raw_columns = _raw_target_columns(expr, measured) if measured else None
+        size_factor = _size_factors(expr)
+        # Mean and shared overdispersion of every gene in each context's controls.
+        control_fit = {}
+        for ctx in context_values:
+            ctrl_rows = np.flatnonzero(ntc & (contexts == ctx))
+            if ctrl_rows.size >= kcfg.min_control_cells:
+                control_fit[ctx] = _control_fit(counts[ctrl_rows], size_factor[ctrl_rows])
+        # Each targeting cell's unperturbed expectation, from its context's controls.
+        model_mean = np.full(expr.n_obs, np.nan)
+        model_phi = np.full(expr.n_obs, np.nan)
+        escaper_prob = np.full(expr.n_obs, np.nan)
 
     rows: List[Dict[str, object]] = []
     for gene in all_targets:
@@ -159,6 +344,8 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
         x = None
         if gene in col_of:
             x = columns[:, col_of[gene]].toarray().ravel()
+            if count_model:
+                x_raw = raw_columns[:, col_of[gene]].toarray().ravel()
 
         # Per-context baseline and ratio; `ok` groups go on to steps 1-3.
         gene_rows: List[Dict[str, object]] = []
@@ -195,12 +382,49 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
                     ratio[cells] = x[cells] / mean
                     row["mean_ratio"] = float(np.mean(ratio[cells]))
                     row["group_status"] = "ok"
+                    if count_model:
+                        gene_index = expr.var_names.get_loc(gene)
+                        mu = control_fit[ctx][0][gene_index]
+                        phi = control_fit[ctx][1][gene_index]
+                        row["control_mean_counts"] = mu
+                        row["control_dispersion"] = phi
+                        model_mean[cells] = mu * size_factor[cells]
+                        model_phi[cells] = phi
             gene_rows.append(row)
 
-        if kcfg.mode == "pooled":
-            _decide_pooled(gene_rows, status, ratio, kcfg, mean_cut)
+        if count_model:
+
+            def group_test(cells):
+                rho, pi, p_escaper = _fit_mixture(x_raw[cells], model_mean[cells], model_phi[cells])
+                escaper_prob[cells] = p_escaper
+                fields = {
+                    "group_mean_ratio": float(np.mean(ratio[cells])),
+                    "rho": rho,
+                    "escaper_fraction": pi,
+                }
+                # A low rho alone is not enough: a group without knockdown can be fitted
+                # as "most cells knocked down to ~0 plus many escapers". Most cells must
+                # be knockdowns.
+                passed = rho < kcfg.max_rho and pi < kcfg.max_escaper_fraction
+                return passed, fields
+
+            def mark(cells):
+                is_escaper = escaper_prob[cells] >= kcfg.min_escaper_prob
+                status[cells] = np.where(is_escaper, STATUS_ESCAPER, STATUS_KNOCKDOWN)
+
         else:
-            _decide_per_context(gene_rows, status, ratio, kcfg, mean_cut)
+
+            def group_test(cells):
+                value = float(np.mean(ratio[cells]))
+                return value < mean_cut, {"group_mean_ratio": value}
+
+            def mark(cells):
+                _mark_group(status, ratio, cells, kcfg.max_cell_ratio)
+
+        if kcfg.mode == "pooled":
+            _decide_pooled(gene_rows, status, kcfg, group_test, mark)
+        else:
+            _decide_per_context(gene_rows, status, kcfg, group_test, mark)
         rows.extend(gene_rows)
 
     for row in rows:
@@ -213,14 +437,18 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
     expr.obs[OBS_KD_RATIO] = ratio
     expr.obs[OBS_KD_STATUS] = pd.Categorical(status, categories=list(ALL_STATUSES))
     expr.obs[OBS_KD_KEEP] = np.isin(status, KEEP_STATUSES)
+    if count_model:
+        expr.obs[OBS_KD_ESCAPER_PROB] = escaper_prob
 
     table = pd.DataFrame(rows)
     if not table.empty:
         table.insert(2, "mode", kcfg.mode)
+        table.insert(3, "method", kcfg.method)
     n_marked = int((targeting & ~expr.obs[OBS_KD_KEEP].to_numpy()).sum())
     logger.info(
-        "Knockdown mask (mode=%s, context=%s): %d/%d targeting cells marked for "
-        "removal across %d targets; no cells removed",
+        "Knockdown mask (method=%s, mode=%s, context=%s): %d/%d targeting cells "
+        "marked for removal across %d targets; no cells removed",
+        kcfg.method,
         kcfg.mode,
         kcfg.context_key or "none",
         n_marked,
@@ -233,11 +461,16 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
 def _decide_per_context(
     gene_rows: List[Dict[str, object]],
     status: np.ndarray,
-    ratio: np.ndarray,
     kcfg,
-    mean_cut: float,
+    group_test,
+    mark,
 ) -> None:
-    """``per_context`` and ``any_context``: steps 1-3 on each (target, context)."""
+    """``per_context`` and ``any_context``: steps 1-3 on each (target, context).
+
+    ``group_test(cells)`` returns whether the group passes step 1 and the fields
+    to record; ``mark(cells)`` splits a passing group into knockdowns and
+    escapers.
+    """
     testable = []
     for row in gene_rows:
         if row["group_status"] != "ok":
@@ -246,8 +479,9 @@ def _decide_per_context(
             row["group_status"] = STATUS_NON_TESTABLE
             row["reason"] = f"fewer than {kcfg.min_cells} cells"
             continue
-        row["group_mean_ratio"] = row["mean_ratio"]
-        row["passed_group"] = bool(row["mean_ratio"] < mean_cut)
+        passed, fields = group_test(row["_cells"])
+        row.update(fields)
+        row["passed_group"] = bool(passed)
         testable.append(row)
 
     any_passed = any(row["passed_group"] for row in testable)
@@ -255,7 +489,7 @@ def _decide_per_context(
         cells = row["_cells"]
         if row["passed_group"]:
             row["group_status"] = "pass"
-            _mark_group(status, ratio, cells, kcfg.max_cell_ratio)
+            mark(cells)
         elif kcfg.mode == "any_context" and any_passed:
             row["group_status"] = STATUS_UNFILTERED_CONTEXT
             status[cells] = STATUS_UNFILTERED_CONTEXT
@@ -267,14 +501,15 @@ def _decide_per_context(
 def _decide_pooled(
     gene_rows: List[Dict[str, object]],
     status: np.ndarray,
-    ratio: np.ndarray,
     kcfg,
-    mean_cut: float,
+    group_test,
+    mark,
 ) -> None:
     """``pooled``: one group per target over every context with a baseline.
 
-    The mean is taken over the pooled per-cell ratios, so contexts are
-    weighted by their cell count; the per-context means stay in the table.
+    The group test runs on the pooled cells, so contexts are weighted by their
+    cell count; each cell keeps its own context's baseline, and the
+    per-context mean ratios stay in the table.
     """
     ok = [row for row in gene_rows if row["group_status"] == "ok"]
     if not ok:
@@ -286,14 +521,14 @@ def _decide_pooled(
             row["group_status"] = STATUS_NON_TESTABLE
             row["reason"] = f"fewer than {kcfg.min_cells} cells pooled"
         return
-    pooled_mean = float(np.mean(ratio[cells]))
-    passed = bool(pooled_mean < mean_cut)
+    passed, fields = group_test(cells)
+    passed = bool(passed)
     for row in ok:
-        row["group_mean_ratio"] = pooled_mean
+        row.update(fields)
         row["passed_group"] = passed
         row["group_status"] = "pass" if passed else STATUS_FAILED_GROUP
     if passed:
-        _mark_group(status, ratio, cells, kcfg.max_cell_ratio)
+        mark(cells)
     else:
         status[cells] = STATUS_FAILED_GROUP
 

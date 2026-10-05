@@ -728,6 +728,29 @@ knockdown_filter:
 final = adata[adata.obs["kd_keep"] & (adata.obs["perturbation_class"] != "ambiguous")]
 ```
 
+`method: count_model` replaces steps 1-2 with a negative-binomial mixture on
+the target's raw counts (`layers['counts']`; the run stops if the first 10,000
+cells of that layer are not non-negative integers). Each target cell is either
+unperturbed (an escaper), with the mean and overdispersion of its context's
+controls scaled by its library size, or knocked down to a fraction `rho` of
+that mean. EM fits `rho` and the escaper fraction per group. The group passes
+when `rho < max_rho`, so escapers no longer dilute the test, and the escaper
+fraction is below `max_escaper_fraction` (0.5: most cells must be knocked down;
+without it, a group with no knockdown can be fitted as a near-zero majority plus
+escapers, which passed 1.7% of null groups built from Nadig control cells), and a cell is an
+escaper when `obs['kd_escaper_prob']` reaches `min_escaper_prob`. The table
+gains `rho`, `escaper_fraction`, `control_mean_counts` and `control_dispersion`.
+The dispersion is shared across genes as in DESeq2: each gene's estimate from
+its context's controls is shrunk toward a trend over all genes, weighted by how
+noisy it is (measured by splitting the controls in half). This helps when a
+context has few controls (about 20-35% lower error at 30-100 cells in
+simulation) and changes little with thousands.
+The ratio cut calls every cell with a single count an escaper when the target is
+weakly expressed. The count model does not: a single count is weak evidence,
+so the posterior stays near the escaper fraction and such cells are left as
+knockdowns. The posterior is calibrated but conservative: when escaper and
+knocked-down counts overlap, many escapers stay below the 0.9 cut.
+
 Non-targeting guides are detected by pattern (`non`, `non_targeting`, `NTC`,
 `scramble`, …) via `guides.ntc_patterns` and used as the preferred control group.
 

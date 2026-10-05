@@ -184,7 +184,8 @@ def test_context_modes_require_a_context_key():
 # ---------------------------------------------------------------------------
 
 
-def test_pipeline_writes_the_mask_without_removing_cells(tmp_path):
+@pytest.mark.parametrize("method", ["mean_ratio", "count_model"])
+def test_pipeline_writes_the_mask_without_removing_cells(tmp_path, method):
     import scanpy as sc
 
     from make_synthetic import KD_TARGETS, NULL_TARGETS, make_dataset
@@ -193,7 +194,7 @@ def test_pipeline_writes_the_mask_without_removing_cells(tmp_path):
 
     synthetic = {"dir": tmp_path, **make_dataset(tmp_path / "data", n_lanes=2, n_cells=300)}
     base = run_pipeline(_base_config(synthetic, tmp_path / "base"))
-    kd = {"enabled": True, "mode": "per_context", "context_key": "condition", "min_cells": 5}
+    kd = {"enabled": True, "mode": "per_context", "context_key": "condition", "min_cells": 5, "method": method}
     res = run_pipeline(_base_config(synthetic, tmp_path / "kd", knockdown_filter=kd))
 
     assert res.n_cells == base.n_cells
@@ -209,3 +210,171 @@ def test_pipeline_writes_the_mask_without_removing_cells(tmp_path):
     for t in NULL_TARGETS:
         assert by_target[t] == {"failed_group"}
     assert table["log2fc_ntc"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# method: count_model, on simulated negative-binomial counts with known truth
+# ---------------------------------------------------------------------------
+
+
+def _nb(rng, mean, phi):
+    r = 1.0 / phi
+    return rng.negative_binomial(r, r / (r + mean))
+
+
+@pytest.fixture
+def counts_adata():
+    """600 controls and three targets of 300 cells, with varying library size.
+
+    KD: 80% of cells at rho = 0.2, 20% escapers.   NULL: no knockdown.
+    LOW: control mean 0.4 counts (about 30% detected), every cell at rho = 0.2.
+    MOSTESC: 30% of cells at rho = 0.2, 70% escapers.
+    """
+    rng = np.random.default_rng(0)
+    base = {"KD": 8.0, "NULL": 8.0, "LOW": 0.4, "MOSTESC": 8.0}
+    n_ctrl, n_target, n_filler = 600, 300, 50
+    labels = ["non-targeting"] * n_ctrl + [t for t in base for _ in range(n_target)]
+    n = len(labels)
+    depth = rng.lognormal(0.0, 0.3, n)
+    level = np.ones((n, len(base)))
+    escaper = np.zeros(n, dtype=bool)
+    for j, t in enumerate(base):
+        rows = np.flatnonzero(np.array(labels) == t)
+        if t == "KD":
+            escaper[rows[: int(0.2 * n_target)]] = True
+            level[rows[int(0.2 * n_target) :], j] = 0.2
+        if t == "LOW":
+            level[rows, j] = 0.2
+        if t == "MOSTESC":
+            escaper[rows[: int(0.7 * n_target)]] = True
+            level[rows[int(0.7 * n_target) :], j] = 0.2
+    targets = np.column_stack(
+        [_nb(rng, base[t] * depth * level[:, j], 0.1) for j, t in enumerate(base)]
+    )
+    filler = rng.poisson(40.0 * depth[:, None], (n, n_filler))
+    counts = np.hstack([targets, filler]).astype(np.float64)
+    library = counts.sum(axis=1, keepdims=True)
+    lognorm = np.log1p(counts / library * np.median(library))
+
+    obs = pd.DataFrame(
+        {
+            "target_gene": labels,
+            "perturbation_class": ["non-targeting" if t == "non-targeting" else "targeting" for t in labels],
+            "true_escaper": escaper,
+        },
+        index=[f"cell{i}" for i in range(n)],
+    )
+    var = pd.DataFrame(index=list(base) + [f"F{k}" for k in range(n_filler)])
+    a = ad.AnnData(X=sp.csr_matrix(lognorm), obs=obs, var=var)
+    a.layers["counts"] = sp.csr_matrix(counts)
+    a.layers[LOGNORM_LAYER] = sp.csr_matrix(lognorm)
+    return a
+
+
+def test_count_model_recovers_knockdown_and_escapers(counts_adata):
+    a, table = _run(counts_adata, method="count_model")
+    row = table.set_index("target_gene").loc["KD"]
+    assert row["group_status"] == "pass"
+    assert 0.12 < row["rho"] < 0.3
+    assert 0.12 < row["escaper_fraction"] < 0.3
+
+    # Escaper counts (mean 8) and knocked-down counts (mean 1.6) overlap, so many
+    # escapers get a middling posterior and stay unmarked at 0.9. What the model
+    # promises is that the posterior is honest: cells called are escapers, and
+    # the posterior is high for escapers and low for knocked-down cells.
+    kd = a.obs[a.obs["target_gene"] == "KD"]
+    called = kd[OBS_KD_STATUS] == "escaper"
+    assert called.sum() > 10
+    assert kd.loc[called, "true_escaper"].mean() > 0.9
+    prob = kd["kd_escaper_prob"]
+    assert prob[kd["true_escaper"]].mean() > 0.5
+    assert prob[~kd["true_escaper"]].mean() < 0.1
+
+
+def test_count_model_fails_a_target_without_knockdown(counts_adata):
+    """Without knockdown, rho and the escaper fraction are not identifiable (the
+    fit may be rho near 1, or a low rho with most cells as escapers); either
+    way the group must fail."""
+    a, table = _run(counts_adata, method="count_model")
+    assert table.set_index("target_gene").loc["NULL", "group_mean_ratio"] > 0.8
+    assert _statuses(a, "NULL") == {"failed_group": 300}
+
+
+def test_count_model_does_not_call_escapers_from_single_counts(counts_adata):
+    """LOW is knocked down in every cell, but about 8% of cells still catch a
+    count. The ratio cut calls those escapers; the count model, seeing that a
+    single count is only weak evidence, calls almost none."""
+    a_model, table = _run(counts_adata.copy(), method="count_model")
+    a_ratio, _ = _run(counts_adata.copy(), method="mean_ratio")
+    assert table.set_index("target_gene").loc["LOW", "group_status"] == "pass"
+    n_model = _statuses(a_model, "LOW").get("escaper", 0)
+    n_ratio = _statuses(a_ratio, "LOW").get("escaper", 0)
+    assert n_model <= 0.03 * 300
+    assert n_ratio > 3 * max(n_model, 1)
+
+
+def test_count_model_rejects_normalized_counts(counts_adata):
+    counts_adata.layers["counts"] = counts_adata.layers[LOGNORM_LAYER].copy()
+    with pytest.raises(ValueError, match="raw counts"):
+        _run(counts_adata, method="count_model")
+
+
+def test_unknown_method_is_rejected():
+    cfg = Config.from_dict(
+        {"input": {"h5ad": "x.h5ad"}, "knockdown_filter": {"enabled": True, "method": "median"}}
+    )
+    with pytest.raises(ValueError, match="method"):
+        cfg.validate()
+
+
+def test_sharing_dispersion_across_genes_beats_gene_wise_with_few_controls():
+    """400 genes, true phi = 0.05 + 0.5 / mean, only 30 control cells: each gene's
+    own moment estimate is noisy, and shrinking toward the trend over genes
+    brings it closer to the truth."""
+    from perturbseq_pipeline.knockdown_filter import _control_fit
+
+    rng = np.random.default_rng(1)
+    n_cells, n_genes = 30, 400
+    mean = np.exp(rng.uniform(np.log(0.5), np.log(50), n_genes))
+    true_phi = 0.05 + 0.5 / mean
+    s = rng.lognormal(0.0, 0.2, n_cells)
+    s = s / np.median(s)
+    counts = np.column_stack([_nb(rng, mean[g] * s, true_phi[g]) for g in range(n_genes)])
+
+    mu, phi_shared = _control_fit(sp.csr_matrix(counts.astype(np.float64)), s)
+    m = mu[None, :] * s[:, None]
+    phi_gene = (((counts - m) ** 2).sum(0) - m.sum(0)) / (m**2).sum(0)
+
+    def log_error(phi):
+        return np.median(np.abs(np.log(np.maximum(phi, 1e-4)) - np.log(true_phi)))
+
+    assert log_error(phi_shared) < 0.85 * log_error(phi_gene)
+
+
+def test_dispersion_fit_stays_finite_with_ten_controls_and_tied_counts():
+    """A lane with 10 controls (5 per split half): most genes have the same tiny
+    total, so quantile bin edges coincide. Bins by quantile left a bin empty and
+    turned every gene's phi into NaN, which then passed groups at rho = 0.01."""
+    from perturbseq_pipeline.knockdown_filter import _control_fit
+
+    rng = np.random.default_rng(2)
+    n_cells = 10
+    s = np.ones(n_cells)
+    # 800 genes with one count in every cell (identical means in both halves), 200 others.
+    tied = np.ones((n_cells, 800))
+    expressed = np.column_stack([_nb(rng, np.full(n_cells, m), 0.1) for m in rng.uniform(0.5, 20, 200)])
+    counts = sp.csr_matrix(np.hstack([tied, expressed]).astype(np.float64))
+    mu, phi = _control_fit(counts, s)
+    assert np.isfinite(phi[mu > 0]).all()
+
+
+def test_count_model_fails_a_group_that_is_mostly_escapers(counts_adata):
+    """MOSTESC is knocked down in only 30% of cells: rho is low, but most cells
+    escape, so it fails. Without the escaper-fraction rule it would pass."""
+    a, table = _run(counts_adata.copy(), method="count_model")
+    row = table.set_index("target_gene").loc["MOSTESC"]
+    assert row["rho"] < 0.3 and row["escaper_fraction"] > 0.5
+    assert row["group_status"] == "failed_group"
+
+    _, table = _run(counts_adata.copy(), method="count_model", max_escaper_fraction=1.0)
+    assert table.set_index("target_gene").loc["MOSTESC", "group_status"] == "pass"

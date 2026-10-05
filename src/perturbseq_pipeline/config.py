@@ -643,6 +643,18 @@ class KnockdownFilterConfig:
     #: cells are marked for filtering: with mostly-zero counts every cell would
     #: pass the ratio cut through dropout alone.
     min_pct_expressing_control: float = 10.0
+    #: ``mean_ratio`` (steps 1-2 on ``kd_ratio``) or ``count_model``: a
+    #: negative-binomial mixture on the target's raw counts that fits ``rho``
+    #: (expression left in knocked-down cells, relative to control) and the
+    #: escaper fraction per group, and a P(escaper) per cell.
+    method: str = "mean_ratio"
+    #: count_model step 1: the group passes when ``rho`` is below this.
+    max_rho: float = 0.3
+    #: count_model step 1, also: the fitted escaper fraction must be below this,
+    #: i.e. most cells are knocked down.
+    max_escaper_fraction: float = 0.5
+    #: count_model step 2: a cell is an escaper when P(escaper) reaches this.
+    min_escaper_prob: float = 0.9
 
 
 # ===========================================================================
@@ -2021,7 +2033,19 @@ class Config:
             )
         if k.enabled and k.mode in ("per_context", "any_context") and not k.context_key:
             raise ValueError(f"knockdown_filter.mode {k.mode!r} needs knockdown_filter.context_key")
-        for fld in ("max_mean_ratio", "max_mean_ratio_any", "max_cell_ratio"):
+        if k.method not in ("mean_ratio", "count_model"):
+            raise ValueError(
+                f"knockdown_filter.method must be 'mean_ratio' or 'count_model' (got {k.method!r})"
+            )
+        if not 0 < k.max_escaper_fraction <= 1:
+            raise ValueError(
+                f"knockdown_filter.max_escaper_fraction must be in (0, 1] (got {k.max_escaper_fraction!r})"
+            )
+        if not 0 < k.min_escaper_prob < 1:
+            raise ValueError(
+                f"knockdown_filter.min_escaper_prob must be in (0, 1) (got {k.min_escaper_prob!r})"
+            )
+        for fld in ("max_mean_ratio", "max_mean_ratio_any", "max_cell_ratio", "max_rho"):
             val = getattr(k, fld)
             if val is not None and val <= 0:
                 raise ValueError(f"knockdown_filter.{fld} must be > 0 (got {val!r})")
