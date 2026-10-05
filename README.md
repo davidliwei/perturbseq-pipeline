@@ -733,7 +733,7 @@ the target's raw counts (`layers['counts']`; the run stops if the first 10,000
 cells of that layer are not non-negative integers). Each target cell is either
 unperturbed (an escaper), with the mean and overdispersion of its context's
 controls scaled by its library size, or knocked down to a fraction `rho` of
-that mean. EM fits `rho` and the escaper fraction per group. The group passes
+that mean. Maximum likelihood fits `rho` and the escaper fraction per group. The group passes
 when `rho < max_rho`, so escapers no longer dilute the test, and the escaper
 fraction is below `max_escaper_fraction` (0.5: most cells must be knocked down;
 without it, a group with no knockdown can be fitted as a near-zero majority plus

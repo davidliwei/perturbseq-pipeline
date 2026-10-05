@@ -39,7 +39,7 @@ with library-size factor ``s_i`` in context ``c`` is
 where ``mu_c`` and ``phi_c`` (mean per unit library size and overdispersion)
 come from the non-targeting cells of ``c``, with ``phi_c`` shared across genes
 (see ``_control_fit``); ``pi`` (escaper fraction) and
-``rho`` (expression left in knocked-down cells) are fitted per group by EM. The
+``rho`` (expression left in knocked-down cells) are fitted per group by maximum likelihood. The
 group passes when ``rho < max_rho``, so escapers do not dilute the test, and
 the escaper fraction is below ``max_escaper_fraction`` (a group with no
 knockdown can otherwise be fitted as a near-zero majority plus escapers); and a
@@ -60,7 +60,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from scipy.optimize import least_squares
-from scipy.special import gammaln
+from scipy.special import expit, gammaln, logit
 
 from .cluster import LOGNORM_LAYER
 from .config import Config
@@ -74,7 +74,7 @@ OBS_KD_STATUS = "kd_status"
 OBS_KD_KEEP = "kd_keep"
 OBS_KD_ESCAPER_PROB = "kd_escaper_prob"  # count_model only
 
-#: Values of ``rho`` searched in the EM's M-step: expression left in
+#: Values of ``rho`` searched by ``_fit_mixture``: expression left in
 #: knocked-down cells, from 1% of control to no knockdown at all.
 RHO_GRID = np.linspace(0.01, 1.0, 100)
 
@@ -252,38 +252,34 @@ def _nb_logpmf(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> np.ndarray:
     )
 
 
-def _fit_mixture(
-    x: np.ndarray, mean: np.ndarray, phi: np.ndarray, max_iter: int = 200
-) -> Tuple[float, float, np.ndarray]:
-    """EM for ``rho`` and ``pi`` in one group; returns them and P(escaper) per cell.
+def _fit_mixture(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> Tuple[float, float, np.ndarray]:
+    """Maximum-likelihood ``rho`` and ``pi`` for one group; returns them and P(escaper) per cell.
 
     ``mean`` and ``phi`` are each cell's unperturbed expectation, from its own
-    context's controls. The M-step for ``rho`` has no closed form under the
-    negative binomial, so it is a search over RHO_GRID; the escaper term does
-    not depend on ``rho`` and is computed once.
+    context's controls. For each ``rho`` on RHO_GRID the log-likelihood is concave
+    in ``pi`` and peaks where ``pi`` equals the mean P(escaper) over cells, found
+    by bisection; the (rho, pi) pair with the highest log-likelihood wins.
     """
-    log_escaper = _nb_logpmf(x, mean, phi)
+    log_escaper = _nb_logpmf(x, mean, phi)[None, :]
     log_kd = _nb_logpmf(x[None, :], RHO_GRID[:, None] * mean[None, :], phi[None, :])
     # A NaN here would make the rho search silently return the grid's first value
     # (rho = 0.01) and pass a group with no knockdown.
     if not (np.isfinite(log_escaper).all() and np.isfinite(log_kd).all()):
         raise ValueError("count_model: non-finite likelihood; check control mean and dispersion")
 
-    # Start from "no escapers": the rho that best explains all cells.
-    rho_index = int(np.argmax(log_kd.sum(axis=1)))
-    pi = 0.1
-    for _ in range(max_iter):
-        log_e = np.log(pi) + log_escaper
-        log_k = np.log1p(-pi) + log_kd[rho_index]
-        p_escaper = np.exp(log_e - np.logaddexp(log_e, log_k))
-        # Keep pi strictly inside (0, 1) so both components stay in the model.
-        new_pi = float(np.clip(p_escaper.mean(), 1e-6, 1 - 1e-6))
-        new_rho_index = int(np.argmax(log_kd @ (1.0 - p_escaper)))
-        converged = new_rho_index == rho_index and abs(new_pi - pi) < 1e-6
-        pi, rho_index = new_pi, new_rho_index
-        if converged:
-            break
-    return float(RHO_GRID[rho_index]), pi, p_escaper
+    # P(escaper) of each cell for each rho is expit(logit(pi) + log f_E/f_K).
+    log_ratio = log_escaper - log_kd
+    # pi stays inside (0, 1) so both components stay in the model.
+    lo, hi = np.full(RHO_GRID.size, 1e-6), np.full(RHO_GRID.size, 1 - 1e-6)
+    for _ in range(30):
+        pi = (lo + hi) / 2
+        rising = expit(logit(pi)[:, None] + log_ratio).mean(axis=1) > pi
+        lo, hi = np.where(rising, pi, lo), np.where(rising, hi, pi)
+    pi = (lo + hi) / 2
+    log_lik = np.logaddexp(np.log(pi)[:, None] + log_escaper, np.log1p(-pi)[:, None] + log_kd).sum(axis=1)
+    best = int(np.argmax(log_lik))
+    p_escaper = expit(logit(pi[best]) + log_ratio[best])
+    return float(RHO_GRID[best]), float(pi[best]), p_escaper
 
 
 def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, pd.DataFrame]:
