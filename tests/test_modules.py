@@ -14,12 +14,7 @@ import numpy as np
 import pytest
 
 from perturbseq_pipeline.config import Config
-from perturbseq_pipeline.guides import (
-    CLASS_NTC,
-    CLASS_TARGETING,
-    OBS_CLASS,
-    OBS_TARGET,
-)
+from perturbseq_pipeline.guides import CLASS_NTC, CLASS_TARGETING, OBS_CLASS, OBS_TARGET
 from perturbseq_pipeline.modules import compute_modules
 
 
@@ -36,13 +31,10 @@ def _planted_adata(
     """AnnData where group g's perturbations raise gene-block g and lower the rest."""
     rng = np.random.default_rng(seed)
     n_blocks = n_module_groups
-    block_genes = [
-        [f"B{b}_G{j}" for j in range(genes_per_block)] for b in range(n_blocks)
-    ]
+    block_genes = [[f"B{b}_G{j}" for j in range(genes_per_block)] for b in range(n_blocks)]
     noise_genes = [f"N{j}" for j in range(n_noise_genes)]
     genes = [g for blk in block_genes for g in blk] + noise_genes
     gene_idx = {g: i for i, g in enumerate(genes)}
-
     rows, targets, klass = [], [], []
 
     def _cell(active_block: int, sign: float):
@@ -75,7 +67,6 @@ def _planted_adata(
         rows.append(np.clip(v, 0, None))
         targets.append("non-targeting")
         klass.append(CLASS_NTC)
-
     X = np.asarray(rows, dtype=np.float64)
     adata = ad.AnnData(X=X.copy())
     adata.var_names = genes
@@ -105,18 +96,15 @@ def test_modules_recovers_planted_coregulation():
     adata, block_genes = _planted_adata()
     cfg = _cfg(n_programs=2, n_modules=2)
     res = compute_modules(adata, cfg)
-
     assert res is not None
     assert res.n_modules == 2 and res.n_programs == 2
     assert res.effect_matrix.shape == (6, 40)  # 6 perturbations x 40 block genes
-
     # Perturbations of the same planted group must share a module.
     mod = res.modules.set_index("target_gene")["module"]
     g0 = {mod[f"P0_{p}"] for p in range(3)}
     g1 = {mod[f"P1_{p}"] for p in range(3)}
     assert len(g0) == 1 and len(g1) == 1, "each group should collapse to one module"
     assert g0 != g1, "the two groups must be different modules"
-
     # Genes of the same planted block must share a program.
     prog = res.gene_programs.set_index("gene")["program"]
     p0 = {prog[g] for g in block_genes[0]}
@@ -149,7 +137,6 @@ def test_hub_de_genes_are_significance_gated():
     res = compute_modules(adata, _cfg(n_programs=2, n_modules=3, min_cells_per_perturbation=10))
     assert res is not None
     assert "n_cells" in res.hubs.columns, "hub table must expose n_cells"
-
     hubs = res.hubs.set_index("target_gene")
     assert hubs.loc["PN", "n_cells"] == 12
     # The no-effect, low-n perturbation must have essentially no DE genes...

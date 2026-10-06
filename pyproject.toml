@@ -66,3 +66,14 @@ perturbseq_pipeline = ["templates/*.html", "templates/*.css"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["cache", "scratch", "results", ".git", ".pytest_cache"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.format]
+# Ignore trailing commas when deciding whether to split a call or literal over lines.
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false

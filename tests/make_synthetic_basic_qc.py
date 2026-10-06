@@ -57,11 +57,20 @@ def make_design(path: Path, seed: int = 0) -> pd.DataFrame:
     for t in TARGETS:
         for scaf in ("A", "C"):
             s = spacer()
-            rows.append({"gene": t, "seq": s, "On-Target Efficacy Score": round(rng.uniform(0.2, 1.2), 3), "BeginsWithG": s.startswith("G")})
+            rows.append(
+                {
+                    "gene": t,
+                    "seq": s,
+                    "On-Target Efficacy Score": round(rng.uniform(0.2, 1.2), 3),
+                    "BeginsWithG": s.startswith("G"),
+                }
+            )
             scaffold_of[s] = scaf
     for i in range(4):
         s = spacer()
-        rows.append({"gene": "NO-TARGET", "seq": s, "On-Target Efficacy Score": float("nan"), "BeginsWithG": s.startswith("G")})
+        rows.append(
+            {"gene": "NO-TARGET", "seq": s, "On-Target Efficacy Score": float("nan"), "BeginsWithG": s.startswith("G")}
+        )
         scaffold_of[s] = "A" if i % 2 == 0 else "C"
     for t in ("GENEA", "NO-TARGET"):  # designed but never observed
         s = spacer()
@@ -73,7 +82,9 @@ def make_design(path: Path, seed: int = 0) -> pd.DataFrame:
     return df
 
 
-def write_10x_h5(path: Path, counts: sp.csr_matrix, barcodes: List[str], gene_ids: List[str], gene_names: List[str]) -> None:
+def write_10x_h5(
+    path: Path, counts: sp.csr_matrix, barcodes: List[str], gene_ids: List[str], gene_names: List[str]
+) -> None:
     """Cell Ranger v3-style HDF5 (matrix stored features x barcodes, CSC)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     counts = sp.csr_matrix(counts, dtype=np.int32)
@@ -130,7 +141,7 @@ def make_well(
     prog = np.ones((2, N_GENES))
     prog[0, :80] *= 4.0
     prog[1, 80:160] *= 4.0
-    prog[:, N_GENES - 5:] *= 0.6
+    prog[:, N_GENES - 5 :] *= 0.6
     types = rng.integers(0, 2, size=n_single)
     depth = rng.lognormal(np.log(6000), 0.35, size=n_single)
     singles = np.zeros((n_single, N_GENES), dtype=np.int32)
@@ -148,12 +159,11 @@ def make_well(
     # a few deliberately low-quality cells (low counts, high mt) among singlets
     low = rng.choice(n_single, 6, replace=False)
     X[low[:3]] = (X[low[:3]] * 0.05).astype(np.int32)
-    X[low[3:], N_GENES - 5:] += 3000
+    X[low[3:], N_GENES - 5 :] += 3000
     barcodes = [f"{_rand_seq(prng, 16)}-1" for _ in range(n_cells)]
     assert len(set(barcodes)) == n_cells
     h5 = outdir / well_id / "filtered_feature_bc_matrix.h5"
     write_10x_h5(h5, sp.csr_matrix(X), barcodes, ids, names)
-
     # guide truth
     d = design[design["_scaffold_truth"] != "unsequenced"].reset_index(drop=True)
     A = d[d["_scaffold_truth"] == "A"]["seq"].tolist()
@@ -164,7 +174,7 @@ def make_well(
     no_guide = np.zeros(n_cells, dtype=bool)
     order = rng.permutation(n_cells)
     multiplet_cells = set(order[:n_multiplet].tolist())
-    noguide_cells = set(order[n_multiplet:n_multiplet + n_noguide].tolist())
+    noguide_cells = set(order[n_multiplet : n_multiplet + n_noguide].tolist())
     for i, bc in enumerate(barcodes):
         bare = bc.split("-")[0]
         guides: Dict[str, int] = {}
@@ -183,7 +193,6 @@ def make_well(
                 extra = prng.choice([g for g in A if g != a])
                 guides[extra] = int(rng.integers(4, 30))
         truth_umis[bare] = guides
-
     # FASTQ reads
     reads: List[Tuple[str, str]] = []
     unknown_spacer = "ACGTACGTACGTACGTACGT"
@@ -257,7 +266,13 @@ def basic_qc_config(dataset: Dict[str, object], outdir: Path, **overrides) -> Di
         "run": {"name": "synthetic_qc", "outdir": str(outdir), "seed": 0, "stop_after": "qc"},
         "samples": samples,
         "qc": {
-            "thresholds": {"method": "mad", "n_mads": 3, "min_genes_floor": 50, "min_counts_floor": 200, "max_pct_mt": 20.0},
+            "thresholds": {
+                "method": "mad",
+                "n_mads": 3,
+                "min_genes_floor": 50,
+                "min_counts_floor": 200,
+                "max_pct_mt": 20.0,
+            },
             "doublets": {"enabled": True, "threshold": 0.15},
         },
         "guides": {

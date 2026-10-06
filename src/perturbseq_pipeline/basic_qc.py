@@ -107,22 +107,22 @@ class BasicQCResult:
     adata_pass: Optional[ad.AnnData] = None
 
 
-# ---------------------------------------------------------------------------
 # Sample loading
-# ---------------------------------------------------------------------------
 
 
 def _load_sample(sample_id: str, smp: SampleConfig, cfg: Config) -> ad.AnnData:
     if smp.gex_h5:
         adata = read_10x_h5(
-            smp.gex_h5, sample_id,
+            smp.gex_h5,
+            sample_id,
             var_names=cfg.input.var_names,
             gex_feature_type=cfg.input.gex_feature_type,
             feature_type_column=cfg.input.feature_type_column,
         )
     else:
         adata = read_10x_mtx_sample(
-            smp.gex_mtx_dir, sample_id,
+            smp.gex_mtx_dir,
+            sample_id,
             var_names=cfg.input.var_names,
             gex_feature_type=cfg.input.gex_feature_type,
             feature_type_column=cfg.input.feature_type_column,
@@ -135,18 +135,26 @@ def attach_sample_annotations(adata: ad.AnnData, sample_id: str, smp: SampleConf
     n = adata.n_obs
     adata.obs["sample_id"] = pd.Categorical([sample_id] * n)
     adata.obs[LANE_KEY] = pd.Categorical([sample_id] * n)
-    adata.obs["condition_code"] = pd.Categorical([str(smp.condition_code) if smp.condition_code is not None else "NA"] * n)
+    adata.obs["condition_code"] = pd.Categorical(
+        [str(smp.condition_code) if smp.condition_code is not None else "NA"] * n
+    )
     adata.obs["gem_well"] = pd.Categorical([str(smp.gem_well) if smp.gem_well is not None else "NA"] * n)
-    adata.obs["guide_library"] = pd.Categorical([str(smp.guide_library) if smp.guide_library is not None else "none"] * n)
+    adata.obs["guide_library"] = pd.Categorical(
+        [str(smp.guide_library) if smp.guide_library is not None else "none"] * n
+    )
     for key, val in (smp.metadata or {}).items():
         if key in adata.obs.columns:
-            logger.warning("%s: metadata key %r collides with an existing obs column; stored as %r", sample_id, key, f"{key}_meta")
+            logger.warning(
+                "%s: metadata key %r collides with an existing obs column; stored as %r", sample_id, key, f"{key}_meta"
+            )
             key = f"{key}_meta"
         adata.obs[key] = pd.Categorical([str(val)] * n)
     return adata
 
 
-def _legacy_samples(cfg: Config) -> Tuple[Dict[str, SampleConfig], Dict[str, ad.AnnData], Dict[str, Optional[ad.AnnData]]]:
+def _legacy_samples(
+    cfg: Config,
+) -> Tuple[Dict[str, SampleConfig], Dict[str, ad.AnnData], Dict[str, Optional[ad.AnnData]]]:
     """Adapter: run the basic QC stage on legacy ``input.mtx_dirs`` / ``input.h5ad`` data.
 
     The loaded object is split by lane; guide features already present in the
@@ -170,7 +178,9 @@ def _legacy_samples(cfg: Config) -> Tuple[Dict[str, SampleConfig], Dict[str, ad.
         sub.X = sp.csr_matrix(sub.X)
         sub.layers["counts"] = sub.X.copy()
         cond = str(sub.obs["condition"].iloc[0]) if "condition" in sub.obs else None
-        smp = SampleConfig(gex_mtx_dir=str(data.lanes.get(lane, "")), condition_code=cond, gem_well=None, guide_library=None)
+        smp = SampleConfig(
+            gex_mtx_dir=str(data.lanes.get(lane, "")), condition_code=cond, gem_well=None, guide_library=None
+        )
         adatas[lane] = attach_sample_annotations(sub, lane, smp)
         samples[lane] = smp
         guide_adatas[lane] = guides[mask].copy() if guides is not None else None
@@ -182,25 +192,34 @@ def _guide_result_from_anndata(sample_id: str, gad: ad.AnnData, cfg: Config) -> 
     from .guide_design import CONTROL_TARGET_LABEL, is_control_label
 
     ids = gad.var_names.astype(str).to_numpy()
-    design = pd.DataFrame({
-        "guide_id": ids,
-        "protospacer": "",
-        "target_raw": gad.var["guide_symbol"].astype(str).to_numpy() if "guide_symbol" in gad.var else ids,
-        "scaffold": "unknown",
-        "scaffold_source": "unspecified",
-        "design_index": np.arange(len(ids)),
-    })
+    design = pd.DataFrame(
+        {
+            "guide_id": ids,
+            "protospacer": "",
+            "target_raw": gad.var["guide_symbol"].astype(str).to_numpy() if "guide_symbol" in gad.var else ids,
+            "scaffold": "unknown",
+            "scaffold_source": "unspecified",
+            "design_index": np.arange(len(ids)),
+        }
+    )
     design["is_control"] = is_control_label(design["target_raw"].tolist(), cfg.guides.ntc_patterns)
     design["target"] = np.where(design["is_control"], CONTROL_TARGET_LABEL, design["target_raw"])
     counts = sp.csr_matrix(gad.X, dtype=np.int32)
     res = GuideCountResult(
-        sample_id=sample_id, guide_ids=list(ids), cell_barcodes=list(gad.obs_names.astype(str)),
-        counts=counts, guide_reads=np.zeros(len(ids), dtype=np.int64),
+        sample_id=sample_id,
+        guide_ids=list(ids),
+        cell_barcodes=list(gad.obs_names.astype(str)),
+        counts=counts,
+        guide_reads=np.zeros(len(ids), dtype=np.int64),
         guide_scaffold_reads=np.zeros((len(ids), len(cfg.guides.fastq.scaffolds)), dtype=np.int64),
         scaffold_names=[str(k) for k in cfg.guides.fastq.scaffolds],
-        stats={"source": "input matrix", "guides_designed": len(ids),
-               "guides_detected_any_umi": int((counts.sum(axis=0) > 0).sum()),
-               "total_guide_umis_in_matrix": int(counts.sum()), "cells_in_gex_universe": gad.n_obs},
+        stats={
+            "source": "input matrix",
+            "guides_designed": len(ids),
+            "guides_detected_any_umi": int((counts.sum(axis=0) > 0).sum()),
+            "total_guide_umis_in_matrix": int(counts.sum()),
+            "cells_in_gex_universe": gad.n_obs,
+        },
         source="matrix",
     )
     return res, design
@@ -225,12 +244,12 @@ def _guide_source_for(smp: SampleConfig, cfg: Config) -> str:
     return "none"
 
 
-# ---------------------------------------------------------------------------
 # Stage driver
-# ---------------------------------------------------------------------------
 
 
-def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str] = None, keep_adata: bool = False) -> BasicQCResult:
+def run_basic_qc(
+    cfg: Config, outdir: Path, registry, config_path: Optional[str] = None, keep_adata: bool = False
+) -> BasicQCResult:
     """Run the basic QC stage. See the module docstring for the contract."""
     from . import qc_plots
 
@@ -250,9 +269,7 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         table_paths[name] = p
         return p
 
-    # ------------------------------------------------------------------
     # 1. Samples and GEX loading
-    # ------------------------------------------------------------------
     samples = cfg.resolved_samples()
     legacy_guides: Dict[str, Optional[ad.AnnData]] = {}
     adatas: Dict[str, ad.AnnData] = {}
@@ -264,10 +281,7 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         logger.info("Basic QC: no 'samples' block; splitting legacy input by lane")
         samples, adatas, legacy_guides = _legacy_samples(cfg)
     input_cells = {sid: int(a.n_obs) for sid, a in adatas.items()}
-
-    # ------------------------------------------------------------------
     # 2. Guide design + quantification
-    # ------------------------------------------------------------------
     design: Optional[pd.DataFrame] = None
     if cfg.guides.design.path:
         design = load_guide_design(cfg)
@@ -277,20 +291,23 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
             guide_sources[sid] = "matrix" if g is not None else "none"
     guide_results: Dict[str, GuideCountResult] = {}
     guide_inputs: Dict[str, object] = {}
-
     fastq_jobs: List[GuideCountJob] = []
     for sid, smp in samples.items():
         if guide_sources[sid] != "fastq":
             continue
         if design is None:
             raise ValueError("Guide FASTQ counting requires guides.design.path")
-        files = list(smp.guide_fastqs) if smp.guide_fastqs else find_guide_fastqs(
-            smp.guide_fastq_dir, smp.guide_fastq_pattern or cfg.guides.fastq.read_pattern
+        files = (
+            list(smp.guide_fastqs)
+            if smp.guide_fastqs
+            else find_guide_fastqs(smp.guide_fastq_dir, smp.guide_fastq_pattern or cfg.guides.fastq.read_pattern)
         )
         guide_inputs[sid] = files
         bare = strip_barcode_suffix(adatas[sid].obs[BARCODE_KEY].astype(str), cfg.guides.fastq.barcode_suffix_regex)
         if pd.Index(bare).has_duplicates:
-            raise ValueError(f"{sid}: stripping the barcode suffix produced duplicate barcodes; check guides.fastq.barcode_suffix_regex")
+            raise ValueError(
+                f"{sid}: stripping the barcode suffix produced duplicate barcodes; check guides.fastq.barcode_suffix_regex"
+            )
         fastq_jobs.append(GuideCountJob(sample_id=sid, fastq_files=files, cell_barcodes=list(bare)))
     if fastq_jobs:
         guide_results.update(count_guides(fastq_jobs, design, cfg))
@@ -316,16 +333,12 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
     if design is not None:
         design = infer_scaffold_classes(design, guide_results, cfg)
     classes = scaffold_classes(design) if design is not None else []
-
     guide_count_dirs: Dict[str, Path] = {}
     for sid, res in guide_results.items():
         gdir = outdir / "guide_counts" / sid
         write_guide_counts(res, design, gdir)
         guide_count_dirs[sid] = gdir
-
-    # ------------------------------------------------------------------
     # 3. Per-sample QC (metrics, flags, doublets, guides) + checkpoints
-    # ------------------------------------------------------------------
     thresholds_all: Dict[str, Dict[str, object]] = {}
     doublet_rows: List[Dict[str, object]] = []
     guide_rows: List[Dict[str, object]] = []
@@ -334,56 +347,67 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
     per_sample_h5ads: Dict[str, Path] = {}
     umis_by_sample: Dict[str, np.ndarray] = {}
     sensitivity_tables: List[pd.DataFrame] = []
-
     for sid, expr in adatas.items():
         smp = samples[sid]
         n_in = expr.n_obs
         logger.info("=== Basic QC: sample %s (%d cells) ===", sid, n_in)
         compute_basic_qc_metrics(expr, cfg)
-        cond = expr.obs[cfg.qc.thresholds.condition_key].iloc[0] if cfg.qc.thresholds.condition_key in expr.obs else None
+        cond = (
+            expr.obs[cfg.qc.thresholds.condition_key].iloc[0] if cfg.qc.thresholds.condition_key in expr.obs else None
+        )
         thr = resolve_sample_thresholds(expr.obs, cfg, sid, cond)
         thresholds_all[sid] = thr
         flag_expression_qc(expr, thr)
         flag_tables.append(expression_qc_step_table(expr, sid))
-
         dsum = run_scrublet(expr, cfg, sid, seed=cfg.run.seed)
         doublet_rows.append(dsum)
         if dsum.get("threshold_failed"):
-            warnings.append(f"{sid}: Scrublet automatic threshold failed; predicted_doublet is False for all cells (scores retained).")
+            warnings.append(
+                f"{sid}: Scrublet automatic threshold failed; predicted_doublet is False for all cells (scores retained)."
+            )
         elif dsum.get("threshold_suspect"):
             warnings.append(
                 f"{sid}: Scrublet automatic threshold {dsum.get('threshold'):.3f} looks implausible "
                 f"({dsum.get('threshold_suspect_reason')}); {dsum.get('n_predicted_doublets')} cells called. "
                 "Scores are stored for every cell; choose a threshold after inspection (qc.doublets.threshold)."
             )
-
         res = guide_results.get(sid)
         if res is not None:
             attach_guide_counts(expr, res, design, cfg)
             umis_by_sample[sid] = res.guide_umis()
-            sensitivity_tables.append(guide_detection_sensitivity(expr.obsm[cfg.output.guide_obsm_key], design, cfg, sid))
+            sensitivity_tables.append(
+                guide_detection_sensitivity(expr.obsm[cfg.output.guide_obsm_key], design, cfg, sid)
+            )
         else:
             empty_guide_annotations(expr, cfg, classes)
             if design is not None:
                 expr.obsm[cfg.output.guide_obsm_key] = sp.csr_matrix((expr.n_obs, len(design)), dtype=np.int32)
                 expr.uns["guide_names"] = list(design["guide_id"].astype(str))
         guide_rows.append(guide_sample_summary(expr, sid, res, design, cfg))
-
-        expr.uns["sample"] = prov_mod.uns_safe({
-            "sample_id": sid, "gex_input": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
-            "guide_library": smp.guide_library, "guide_source": guide_sources[sid],
-            "guide_input": guide_inputs.get(sid), "condition_code": smp.condition_code, "gem_well": smp.gem_well,
-        })
+        expr.uns["sample"] = prov_mod.uns_safe(
+            {
+                "sample_id": sid,
+                "gex_input": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
+                "guide_library": smp.guide_library,
+                "guide_source": guide_sources[sid],
+                "guide_input": guide_inputs.get(sid),
+                "condition_code": smp.condition_code,
+                "gem_well": smp.gem_well,
+            }
+        )
         expr.uns["qc_thresholds"] = prov_mod.uns_safe(thr)
-        expr.uns["basic_qc"] = {"stage": STAGE_NAME, "cells_removed": 0, "doublets_removed": 0, "guide_multiplets_removed": 0}
+        expr.uns["basic_qc"] = {
+            "stage": STAGE_NAME,
+            "cells_removed": 0,
+            "doublets_removed": 0,
+            "guide_multiplets_removed": 0,
+        }
         if design is not None:
             expr.uns["guide_features"] = _uns_frame(design)
         assert expr.n_obs == n_in, f"{sid}: cell count changed during basic QC ({n_in} -> {expr.n_obs})"
-
         p = outdir / "per_sample" / f"{sid}_qc_allcells.h5ad"
         write_h5ad(expr, p)
         per_sample_h5ads[sid] = p
-
         obs = expr.obs
         qc_plots.plot_sample_expression_qc(obs, thr, sid, registry)
         qc_plots.plot_doublet_scores(obs, sid, dsum.get("threshold"), registry)
@@ -391,10 +415,7 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
             qc_plots.plot_guide_qc(obs, sid, classes, registry)
             qc_plots.plot_scrublet_vs_guide(obs, sid, registry)
         sample_rows.append(_sample_summary_row(expr, sid, smp, thr, dsum, guide_sources[sid]))
-
-    # ------------------------------------------------------------------
     # 4. Concatenate (not integrate)
-    # ------------------------------------------------------------------
     sample_ids = list(adatas)
     logger.info("Concatenating %d sample(s): %s", len(sample_ids), sample_ids)
     var_ref = adatas[sample_ids[0]].var
@@ -402,8 +423,13 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         if not adatas[sid].var_names.equals(var_ref.index):
             raise ValueError(f"{sid}: gene set differs from {sample_ids[0]}; all samples must share one reference")
     combined = ad.concat(
-        [adatas[s] for s in sample_ids], axis=0, join="inner", merge="same", uns_merge=None,
-        label=None, index_unique=None,
+        [adatas[s] for s in sample_ids],
+        axis=0,
+        join="inner",
+        merge="same",
+        uns_merge=None,
+        label=None,
+        index_unique=None,
     )
     for col in ("gene_ids", "feature_types", "genome", "mt", "ribo", "hb", "gene_symbols"):
         if col in var_ref.columns and col not in combined.var.columns:
@@ -416,51 +442,79 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
     combined.obs["sample_id"] = pd.Categorical(combined.obs["sample_id"].astype(str), categories=sample_ids)
     combined.obs[LANE_KEY] = combined.obs["sample_id"]
     if cfg.output.guide_obsm_key in combined.obsm:
-        combined.obsm[cfg.output.guide_obsm_key] = sp.csr_matrix(combined.obsm[cfg.output.guide_obsm_key], dtype=np.int32)
+        combined.obsm[cfg.output.guide_obsm_key] = sp.csr_matrix(
+            combined.obsm[cfg.output.guide_obsm_key], dtype=np.int32
+        )
     n_all = combined.n_obs
     assert n_all == sum(input_cells.values()), "combined all-cells object lost cells"
     del adatas
-
     provenance = prov_mod.collect(
         config_path=config_path,
         inputs={
-            "samples": {sid: {"gex": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
-                              "guide_library": smp.guide_library, "guide_source": guide_sources[sid],
-                              "guide_input": guide_inputs.get(sid), "input_cells": input_cells[sid]}
-                        for sid, smp in samples.items()},
+            "samples": {
+                sid: {
+                    "gex": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
+                    "guide_library": smp.guide_library,
+                    "guide_source": guide_sources[sid],
+                    "guide_input": guide_inputs.get(sid),
+                    "input_cells": input_cells[sid],
+                }
+                for sid, smp in samples.items()
+            },
             "guide_design": cfg.guides.design.path,
         },
-        extra={"stage": STAGE_NAME, "pipeline_version": _pipeline_version(), "run_name": cfg.run.name, "outdir": str(outdir)},
+        extra={
+            "stage": STAGE_NAME,
+            "pipeline_version": _pipeline_version(),
+            "run_name": cfg.run.name,
+            "outdir": str(outdir),
+        },
     )
     combined.uns["provenance"] = prov_mod.uns_safe(provenance)
     combined.uns["config"] = _config_yaml(cfg)
-    combined.uns["sample_manifest"] = prov_mod.uns_safe({sid: {"gex": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
-                                                                 "guide_library": smp.guide_library, "guide_source": guide_sources[sid],
-                                                                 "condition_code": smp.condition_code, "gem_well": smp.gem_well,
-                                                                 "input_cells": input_cells[sid]} for sid, smp in samples.items()})
+    combined.uns["sample_manifest"] = prov_mod.uns_safe(
+        {
+            sid: {
+                "gex": smp.gex_path() if (smp.gex_h5 or smp.gex_mtx_dir) else "legacy",
+                "guide_library": smp.guide_library,
+                "guide_source": guide_sources[sid],
+                "condition_code": smp.condition_code,
+                "gem_well": smp.gem_well,
+                "input_cells": input_cells[sid],
+            }
+            for sid, smp in samples.items()
+        }
+    )
     combined.uns["qc_thresholds"] = prov_mod.uns_safe(thresholds_all)
     combined.uns["guide_sources"] = prov_mod.uns_safe(dict(guide_sources))
     combined.uns["guide_source"] = (
         next(iter(set(guide_sources.values()))) if len(set(guide_sources.values())) == 1 else "mixed"
     )
     combined.uns["scrublet"] = prov_mod.uns_safe({r["sample_id"]: r for r in doublet_rows})
-    combined.uns["basic_qc"] = prov_mod.uns_safe({
-        "stage": STAGE_NAME, "cells_removed": 0, "doublets_removed": 0, "guide_multiplets_removed": 0,
-        "gex_qc_pass_rule": "NOT(" + " OR ".join(QC_FLAG_COLUMNS) + ")",
-        "note": "predicted_doublet and guide_multiplet_flag are annotations only",
-    })
+    combined.uns["basic_qc"] = prov_mod.uns_safe(
+        {
+            "stage": STAGE_NAME,
+            "cells_removed": 0,
+            "doublets_removed": 0,
+            "guide_multiplets_removed": 0,
+            "gex_qc_pass_rule": "NOT(" + " OR ".join(QC_FLAG_COLUMNS) + ")",
+            "note": "predicted_doublet and guide_multiplet_flag are annotations only",
+        }
+    )
     if design is not None:
         combined.uns["guide_features"] = _uns_frame(design)
         combined.uns["guide_names"] = list(design["guide_id"].astype(str))
         combined.uns["guide_target_genes"] = list(design["target"].astype(str))
-        combined.uns["guide_qc"] = prov_mod.uns_safe({
-            "detection_threshold_umi": int(cfg.guides.multiplet.detection_threshold or cfg.guides.detection_threshold),
-            "scaffold_classes": classes, "perturbation_assignment": "not performed in basic QC",
-        })
-
-    # ------------------------------------------------------------------
+        combined.uns["guide_qc"] = prov_mod.uns_safe(
+            {
+                "detection_threshold_umi": int(
+                    cfg.guides.multiplet.detection_threshold or cfg.guides.detection_threshold
+                ),
+                "scaffold_classes": classes,
+                "perturbation_assignment": "not performed in basic QC",
+            }
+        )
     # 5. Write combined objects
-    # ------------------------------------------------------------------
     stem = Path(cfg.output.h5ad_name).stem
     pass_name = cfg.output.h5ad_name
     all_name = cfg.output.unfiltered_h5ad_name or f"{stem}_allcells.h5ad"
@@ -469,11 +523,13 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
     write_h5ad(combined, all_path)
     pass_mask = combined.obs[GEX_QC_PASS].to_numpy(dtype=bool)
     passed = combined[pass_mask].copy()
-    passed.uns["basic_qc"] = prov_mod.uns_safe({
-        **{k: v for k, v in combined.uns["basic_qc"].items()},
-        "subset": f"{GEX_QC_PASS} == True (expression criteria only; doublets and guide multiplets retained)",
-        "cells_removed": int(n_all - passed.n_obs),
-    })
+    passed.uns["basic_qc"] = prov_mod.uns_safe(
+        {
+            **{k: v for k, v in combined.uns["basic_qc"].items()},
+            "subset": f"{GEX_QC_PASS} == True (expression criteria only; doublets and guide multiplets retained)",
+            "cells_removed": int(n_all - passed.n_obs),
+        }
+    )
     write_h5ad(passed, pass_path)
     n_pass = passed.n_obs
     n_dbl_all = int(combined.obs[PREDICTED_DOUBLET].astype(bool).sum())
@@ -482,12 +538,15 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
     n_gm_pass = int(passed.obs["guide_multiplet_flag"].astype(bool).sum())
     logger.info(
         "Combined: %d cells (all) / %d cells (gex_qc_pass); predicted doublets retained %d / %d; "
-        "guide multiplets retained %d / %d", n_all, n_pass, n_dbl_all, n_dbl_pass, n_gm_all, n_gm_pass,
+        "guide multiplets retained %d / %d",
+        n_all,
+        n_pass,
+        n_dbl_all,
+        n_dbl_pass,
+        n_gm_all,
+        n_gm_pass,
     )
-
-    # ------------------------------------------------------------------
     # 6. Tables
-    # ------------------------------------------------------------------
     sample_summary = pd.DataFrame(sample_rows)
     _write_table("sample_qc_summary", sample_summary)
     cell_cols = [c for c in combined.obs.columns]
@@ -511,16 +570,15 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         feat = design.copy()
         for sid, res in guide_results.items():
             feat[f"umis_{sid}"] = res.guide_umis()
-            feat[f"cells_positive_{sid}"] = res.guide_positive_cells(int(cfg.guides.multiplet.detection_threshold or cfg.guides.detection_threshold))
+            feat[f"cells_positive_{sid}"] = res.guide_positive_cells(
+                int(cfg.guides.multiplet.detection_threshold or cfg.guides.detection_threshold)
+            )
         _write_table("guide_feature_table", feat)
     sensitivity = pd.concat(sensitivity_tables, ignore_index=True) if sensitivity_tables else pd.DataFrame()
     _write_table("guide_detection_sensitivity", sensitivity)
     per_file = [dict(sample_id=sid, **st) for sid, res in guide_results.items() for st in res.per_file]
     _write_table("guide_counting_per_file", pd.DataFrame(per_file) if per_file else None)
-
-    # ------------------------------------------------------------------
     # 7. Combined figures, provenance, report
-    # ------------------------------------------------------------------
     qc_plots.plot_combined_metrics(combined.obs, registry)
     qc_plots.plot_sample_flag_summary(sample_summary, registry)
     if guide_results:
@@ -529,15 +587,17 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         qc_plots.plot_guide_detection_sensitivity(sensitivity, registry)
     qc_plots.plot_doublet_score_by_sample(combined.obs, doublet_rows, registry)
     registry.manifest().to_csv(tabledir / "figure_manifest.csv", index=False)
-
     prov_path = prov_mod.write_json(provenance, outdir / "reports" / "provenance.json")
     from .report import build_qc_report
 
     outputs = {
-        "all-cells h5ad": str(all_path), "expression-QC h5ad": str(pass_path),
+        "all-cells h5ad": str(all_path),
+        "expression-QC h5ad": str(pass_path),
         **{f"per-sample h5ad ({sid})": str(p) for sid, p in per_sample_h5ads.items()},
         **{f"guide counts ({sid})": str(p) for sid, p in guide_count_dirs.items()},
-        "tables": str(tabledir), "figures": str(registry.figdir), "provenance": str(prov_path),
+        "tables": str(tabledir),
+        "figures": str(registry.figdir),
+        "provenance": str(prov_path),
     }
     cards = [
         ("Samples", f"{len(sample_ids)}"),
@@ -550,31 +610,51 @@ def run_basic_qc(cfg: Config, outdir: Path, registry, config_path: Optional[str]
         ("Guide-detected cells", f"{int(combined.obs['guide_detected'].sum()):,}"),
     ]
     report_tables = {
-        "sample_qc_summary": sample_summary, "qc_thresholds": thr_table, "filtering_summary": filtering,
-        "doublet_summary": doublet_summary, "scrublet_vs_guide_multiplet": svg_table, "guide_qc_summary": guide_summary,
+        "sample_qc_summary": sample_summary,
+        "qc_thresholds": thr_table,
+        "filtering_summary": filtering,
+        "doublet_summary": doublet_summary,
+        "scrublet_vs_guide_multiplet": svg_table,
+        "guide_qc_summary": guide_summary,
         "guide_detection_sensitivity": sensitivity,
     }
     report_path = build_qc_report(
-        cfg, registry, outdir / "reports" / cfg.output.report_name, tables=report_tables, cards=cards,
-        outputs=outputs, warnings=warnings, provenance_text=json.dumps(provenance, indent=2, default=str),
+        cfg,
+        registry,
+        outdir / "reports" / cfg.output.report_name,
+        tables=report_tables,
+        cards=cards,
+        outputs=outputs,
+        warnings=warnings,
+        provenance_text=json.dumps(provenance, indent=2, default=str),
     )
-
     result = BasicQCResult(
-        outdir=outdir, allcells_h5ad=all_path, pass_h5ad=pass_path, report=report_path,
-        per_sample_h5ads=per_sample_h5ads, guide_count_dirs=guide_count_dirs, tables=table_paths,
-        provenance_json=prov_path, n_cells_all=n_all, n_cells_pass=n_pass, n_genes=combined.n_vars,
-        n_predicted_doublets_all=n_dbl_all, n_predicted_doublets_pass=n_dbl_pass,
-        n_guide_multiplets_all=n_gm_all, n_guide_multiplets_pass=n_gm_pass,
-        sample_summary=sample_summary, guide_summary=guide_summary, runtime_seconds=time.time() - t0,
-        adata_all=combined if keep_adata else None, adata_pass=passed if keep_adata else None,
+        outdir=outdir,
+        allcells_h5ad=all_path,
+        pass_h5ad=pass_path,
+        report=report_path,
+        per_sample_h5ads=per_sample_h5ads,
+        guide_count_dirs=guide_count_dirs,
+        tables=table_paths,
+        provenance_json=prov_path,
+        n_cells_all=n_all,
+        n_cells_pass=n_pass,
+        n_genes=combined.n_vars,
+        n_predicted_doublets_all=n_dbl_all,
+        n_predicted_doublets_pass=n_dbl_pass,
+        n_guide_multiplets_all=n_gm_all,
+        n_guide_multiplets_pass=n_gm_pass,
+        sample_summary=sample_summary,
+        guide_summary=guide_summary,
+        runtime_seconds=time.time() - t0,
+        adata_all=combined if keep_adata else None,
+        adata_pass=passed if keep_adata else None,
     )
     logger.info("Basic QC stage finished in %.0f s; stopping (run.stop_after = qc)", result.runtime_seconds)
     return result
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _pipeline_version() -> str:
@@ -601,7 +681,9 @@ def _uns_frame(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _sample_summary_row(expr: ad.AnnData, sid: str, smp: SampleConfig, thr: Dict[str, object], dsum: Dict[str, object], guide_source: str) -> Dict[str, object]:
+def _sample_summary_row(
+    expr: ad.AnnData, sid: str, smp: SampleConfig, thr: Dict[str, object], dsum: Dict[str, object], guide_source: str
+) -> Dict[str, object]:
     obs = expr.obs
     n = expr.n_obs
     row: Dict[str, object] = {
@@ -616,8 +698,11 @@ def _sample_summary_row(expr: ad.AnnData, sid: str, smp: SampleConfig, thr: Dict
         "median_n_genes": float(obs["n_genes_by_counts"].median()),
         "median_pct_mt": float(obs["pct_counts_mt"].median()) if "pct_counts_mt" in obs else float("nan"),
         "median_pct_ribo": float(obs["pct_counts_ribo"].median()) if "pct_counts_ribo" in obs else float("nan"),
-        "min_counts": thr.get("min_counts"), "max_counts": thr.get("max_counts"),
-        "min_genes": thr.get("min_genes"), "max_genes": thr.get("max_genes"), "max_pct_mt": thr.get("max_pct_mt"),
+        "min_counts": thr.get("min_counts"),
+        "max_counts": thr.get("max_counts"),
+        "min_genes": thr.get("min_genes"),
+        "max_genes": thr.get("max_genes"),
+        "max_pct_mt": thr.get("max_pct_mt"),
     }
     for col in QC_FLAG_COLUMNS:
         row[col] = int(obs[col].sum())
@@ -638,7 +723,10 @@ def _sample_summary_row(expr: ad.AnnData, sid: str, smp: SampleConfig, thr: Dict
 
 def _filtering_summary(obs_all: pd.DataFrame, obs_pass: pd.DataFrame, sample_ids: List[str]) -> pd.DataFrame:
     rows = []
-    groups = [(s, obs_all[obs_all["sample_id"].astype(str) == s], obs_pass[obs_pass["sample_id"].astype(str) == s]) for s in sample_ids]
+    groups = [
+        (s, obs_all[obs_all["sample_id"].astype(str) == s], obs_pass[obs_pass["sample_id"].astype(str) == s])
+        for s in sample_ids
+    ]
     groups.append(("ALL", obs_all, obs_pass))
     for name, a, p in groups:
         row = {

@@ -35,9 +35,7 @@ _PACKAGES = (
 
 def _git(args: Iterable[str], cwd: Path) -> Optional[str]:
     try:
-        out = subprocess.run(
-            ["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=10
-        )
+        out = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=10)
     except Exception:  # pragma: no cover - git missing
         return None
     if out.returncode != 0:
@@ -90,10 +88,7 @@ def slurm_info() -> Dict[str, Optional[str]]:
 
 
 def collect(
-    *,
-    config_path: Optional[str],
-    inputs: Dict[str, Any],
-    extra: Optional[Dict[str, Any]] = None,
+    *, config_path: Optional[str], inputs: Dict[str, Any], extra: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Assemble the provenance record."""
     rec: Dict[str, Any] = {

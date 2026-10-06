@@ -90,9 +90,13 @@ OBS_PAIR = "pair_assignment"
 OBS_PAIR_STATUS = "pair_assignment_status"
 OBS_PAIR_PROVISIONAL = "pair_assignment_provisional"
 OBS_PAIR_PRIMARY = "pair_assigned_primary"  # bool: cell carries a primary pair label (targeting or NTC pair)
-OBS_PAIR_DETAIL = "pair_resolution_detail"  # why a cell got its status (designed construct / not designed / slot problem)
+OBS_PAIR_DETAIL = (
+    "pair_resolution_detail"  # why a cell got its status (designed construct / not designed / slot problem)
+)
 OBS_CONSTRUCT_TYPE = "construct_type"  # dual_targeting / targeting_plus_ntc / ntc_pair / dual_target_construct / none
-OBS_TARGET_SYMBOL = "target_symbol"  # HGNC-style symbol of the measured transcript for the assigned target (from the pair reference)
+OBS_TARGET_SYMBOL = (
+    "target_symbol"  # HGNC-style symbol of the measured transcript for the assigned target (from the pair reference)
+)
 
 CONSTRUCT_DUAL = "dual_targeting"
 CONSTRUCT_SINGLE_NTC = "targeting_plus_ntc"
@@ -143,10 +147,19 @@ STATUS_NO_GUIDE = "no_guide"
 STATUS_UNRESOLVED = "unresolved_pair"
 
 PAIR_STATUS_ORDER = [
-    STATUS_PAIR_TARGETING, STATUS_PAIR_NTC, STATUS_PAIR_TARGET_NTC, STATUS_PAIR_TARGET_NTC_PROVISIONAL,
-    STATUS_DUAL_TARGET, STATUS_UNRESOLVED, STATUS_INCOMPLETE,
-    "ambiguous_scaffold_A", "ambiguous_scaffold_C", "ambiguous_scaffold_A_and_C",
-    STATUS_UNKNOWN_GUIDE, STATUS_BELOW_MIN_UMI, STATUS_NO_GUIDE,
+    STATUS_PAIR_TARGETING,
+    STATUS_PAIR_NTC,
+    STATUS_PAIR_TARGET_NTC,
+    STATUS_PAIR_TARGET_NTC_PROVISIONAL,
+    STATUS_DUAL_TARGET,
+    STATUS_UNRESOLVED,
+    STATUS_INCOMPLETE,
+    "ambiguous_scaffold_A",
+    "ambiguous_scaffold_C",
+    "ambiguous_scaffold_A_and_C",
+    STATUS_UNKNOWN_GUIDE,
+    STATUS_BELOW_MIN_UMI,
+    STATUS_NO_GUIDE,
 ]
 
 PAIR_SEP = "|"
@@ -162,9 +175,7 @@ def is_pair_mode(gcfg: GuideConfig) -> bool:
     return gcfg.assignment_mode in PAIR_MODES
 
 
-# ---------------------------------------------------------------------------
 # Pair reference
-# ---------------------------------------------------------------------------
 
 
 def _pick(columns, explicit: str, candidates, what: str, required: bool) -> Optional[str]:
@@ -192,7 +203,9 @@ def load_pair_map(path: str | Path, gcfg: GuideConfig) -> pd.DataFrame:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"guides.pair_map_file / pair_reference not found: {path}")
-    df = pd.read_csv(path, sep="\t" if path.suffix.lower() in (".tsv", ".txt") else ",", dtype=str, keep_default_na=False)
+    df = pd.read_csv(
+        path, sep="\t" if path.suffix.lower() in (".tsv", ".txt") else ",", dtype=str, keep_default_na=False
+    )
     if "guide_id" not in df.columns:
         raise ValueError(f"pair reference {path} has no 'guide_id' column; columns: {list(df.columns)}")
     df["guide_id"] = df["guide_id"].astype(str).str.strip()
@@ -220,9 +233,7 @@ def pair_map_is_explicit(pair_map: Optional[pd.DataFrame]) -> bool:
     return pair_map is not None and bool((pair_map["pair_id"] != "").any())
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 
 def _top_two(X: sparse.csr_matrix) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -234,8 +245,12 @@ def _top_two(X: sparse.csr_matrix) -> Tuple[np.ndarray, np.ndarray, np.ndarray, 
     if res is None:
         res = _csr_top_two_python(X)
     top_idx, top_val, second_val, total = res
-    return (np.asarray(top_idx, dtype=np.int64), np.asarray(top_val, dtype=float),
-            np.asarray(second_val, dtype=float), np.asarray(total, dtype=float))
+    return (
+        np.asarray(top_idx, dtype=np.int64),
+        np.asarray(top_val, dtype=float),
+        np.asarray(second_val, dtype=float),
+        np.asarray(total, dtype=float),
+    )
 
 
 def slot_dominance_ratio(top_val, second_val, gcfg: GuideConfig) -> np.ndarray:
@@ -275,9 +290,20 @@ def resolve_guide_metadata(guides: ad.AnnData, gcfg: GuideConfig, pair_map: Opti
         ntc = ntc | guides.var["is_non_targeting"].astype(str).str.lower().isin(["true", "1"]).to_numpy()
     # scaffold
     scol = gcfg.scaffold_column if gcfg.scaffold_column != "auto" else None
-    var_scol = scol if (scol and scol in guides.var.columns) else next((c for c in _SCAFFOLD_CANDIDATES if c in guides.var.columns), None)
+    var_scol = (
+        scol
+        if (scol and scol in guides.var.columns)
+        else next((c for c in _SCAFFOLD_CANDIDATES if c in guides.var.columns), None)
+    )
     if var_scol is not None:
-        scaf = guides.var[var_scol].astype(str).str.strip().replace({"": "unknown", "nan": "unknown", "None": "unknown"}).to_numpy().astype(str)
+        scaf = (
+            guides.var[var_scol]
+            .astype(str)
+            .str.strip()
+            .replace({"": "unknown", "nan": "unknown", "None": "unknown"})
+            .to_numpy()
+            .astype(str)
+        )
     elif pair_map is not None:
         scaf = pd.Series(ids, index=ids).map(pair_map["scaffold"]).fillna("unknown").to_numpy().astype(str)
     else:
@@ -285,17 +311,32 @@ def resolve_guide_metadata(guides: ad.AnnData, gcfg: GuideConfig, pair_map: Opti
             "pair assignment needs a scaffold class per guide: neither a scaffold column in guides.var nor a pair "
             f"reference with one is available (var columns: {list(guides.var.columns)})"
         )
-    pair_id = pd.Series(ids, index=ids).map(pair_map["pair_id"]).fillna("").to_numpy().astype(object) if pair_map is not None else np.array([""] * len(ids), dtype=object)
+    pair_id = (
+        pd.Series(ids, index=ids).map(pair_map["pair_id"]).fillna("").to_numpy().astype(object)
+        if pair_map is not None
+        else np.array([""] * len(ids), dtype=object)
+    )
     missing = ~ids.isin(pair_map.index) if pair_map is not None else np.zeros(len(ids), bool)
     if missing.any():
-        logger.warning("%d guide(s) in the count matrix are absent from the pair reference (treated as unknown scaffold): %s",
-                       int(missing.sum()), ids[missing][:5].tolist())
+        logger.warning(
+            "%d guide(s) in the count matrix are absent from the pair reference (treated as unknown scaffold): %s",
+            int(missing.sum()),
+            ids[missing][:5].tolist(),
+        )
         scaf = np.where(missing, "unknown", scaf)
     logger.info("Guide targets from %s; scaffold classes: %s", src, dict(pd.Series(scaf).value_counts()))
     return targets, ntc, scaf, pair_id
 
 
-_EXTRA_REF_COLUMNS = ("design_guide_id", "designed_slot", "feature_role", "construct_types", "construct_position", "target_symbol", "control_status")
+_EXTRA_REF_COLUMNS = (
+    "design_guide_id",
+    "designed_slot",
+    "feature_role",
+    "construct_types",
+    "construct_position",
+    "target_symbol",
+    "control_status",
+)
 
 
 def _shared_construct_ids(pair_ids_a: np.ndarray, pair_ids_c: np.ndarray, delim: str) -> np.ndarray:
@@ -319,9 +360,7 @@ def _shared_construct_ids(pair_ids_a: np.ndarray, pair_ids_c: np.ndarray, delim:
     return out
 
 
-# ---------------------------------------------------------------------------
 # Main entry point
-# ---------------------------------------------------------------------------
 
 
 def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.AnnData:
@@ -333,11 +372,13 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
     if len(classes) != 2:
         raise ValueError("guides.scaffold_classes must name exactly two scaffold classes")
     cA, cC = classes
-
-    aligned = guides if (guides.n_obs == expr.n_obs and guides.obs_names.equals(expr.obs_names)) else guides[expr.obs_names].copy()
+    aligned = (
+        guides
+        if (guides.n_obs == expr.n_obs and guides.obs_names.equals(expr.obs_names))
+        else guides[expr.obs_names].copy()
+    )
     X = sparse.csr_matrix(aligned.layers["counts"] if "counts" in aligned.layers else aligned.X)
     n = X.shape[0]
-
     ref_path = gcfg.pair_map_file or gcfg.pair_reference
     pair_map = load_pair_map(ref_path, gcfg) if ref_path else None
     explicit = pair_map_is_explicit(pair_map)
@@ -348,27 +389,41 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
         raise ValueError(f"no guide carries a scaffold class in {classes}; values: {np.unique(guide_scaf).tolist()}")
     logger.info(
         "Pair assignment: %d guides (%s), %d without a usable scaffold class; pair reference: %s; ntc partner policy: %s; require_complete_pair=%s",
-        len(guide_ids), ", ".join(f"{c}={int((guide_scaf == c).sum())}" for c in classes), int((~known).sum()),
-        ("explicit pair ids (%s)" % ref_path) if explicit else ("no explicit pair ids -> provisional same-target rule" + (f" ({ref_path})" if ref_path else "")),
-        gcfg.ntc_partner_policy, gcfg.require_complete_pair,
+        len(guide_ids),
+        ", ".join(f"{c}={int((guide_scaf == c).sum())}" for c in classes),
+        int((~known).sum()),
+        ("explicit pair ids (%s)" % ref_path)
+        if explicit
+        else ("no explicit pair ids -> provisional same-target rule" + (f" ({ref_path})" if ref_path else "")),
+        gcfg.ntc_partner_policy,
+        gcfg.require_complete_pair,
     )
-
     g_top_idx, g_top, g_second, total = _top_two(X)
     detected = np.asarray((X > gcfg.detection_threshold).sum(axis=1)).ravel().astype(np.int32)
     min_umi = max(int(gcfg.min_umi), 1)
-
     slot: Dict[str, Dict[str, np.ndarray]] = {}
     for c in classes:
         cols = np.flatnonzero(guide_scaf == c)
         sub = X[:, cols] if len(cols) else sparse.csr_matrix((n, 0))
         t_idx, t_val, s_val, _ = _top_two(sub)
         resolved, multiple, ratio = _slot_gate(t_val, s_val, gcfg)
-        n_strong = np.asarray((sub >= min_umi).sum(axis=1)).ravel().astype(np.int32) if len(cols) else np.zeros(n, dtype=np.int32)
-        slot[c] = dict(idx=cols[t_idx] if len(cols) else np.zeros(n, dtype=np.int64), val=t_val, second=s_val, ratio=ratio,
-                       resolved=resolved, multiple=multiple, none=~(resolved | multiple), n_strong=n_strong)
+        n_strong = (
+            np.asarray((sub >= min_umi).sum(axis=1)).ravel().astype(np.int32)
+            if len(cols)
+            else np.zeros(n, dtype=np.int32)
+        )
+        slot[c] = dict(
+            idx=cols[t_idx] if len(cols) else np.zeros(n, dtype=np.int64),
+            val=t_val,
+            second=s_val,
+            ratio=ratio,
+            resolved=resolved,
+            multiple=multiple,
+            none=~(resolved | multiple),
+            n_strong=n_strong,
+        )
     unk_cols = np.flatnonzero(~known)
     unk_strong = np.asarray((X[:, unk_cols] >= min_umi).sum(axis=1)).ravel() if len(unk_cols) else np.zeros(n)
-
     A, C = slot[cA], slot[cC]
     unl, amb = gcfg.unassigned_label, gcfg.ambiguous_label
     status = np.full(n, "", dtype=object)
@@ -395,14 +450,12 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
     detail[no_strong & ~has_counts] = STATUS_NO_GUIDE
     set_amb(no_strong & has_counts & (unk_strong == 0), STATUS_BELOW_MIN_UMI)
     set_amb(no_strong & has_counts & (unk_strong > 0), STATUS_UNKNOWN_GUIDE)
-
     both_mul = A["multiple"] & C["multiple"]
     set_amb(both_mul, STATUS_AMBIGUOUS_BOTH.format(a=cA, c=cC))
     set_amb(A["multiple"] & ~C["multiple"], STATUS_AMBIGUOUS_SLOT.format(c=cA))
     set_amb(C["multiple"] & ~A["multiple"], STATUS_AMBIGUOUS_SLOT.format(c=cC))
     incomplete = (A["resolved"] & C["none"]) | (C["resolved"] & A["none"])
     set_amb(incomplete, STATUS_INCOMPLETE)
-
     both = A["resolved"] & C["resolved"]
     idx = np.flatnonzero(both)
     if idx.size:
@@ -431,16 +484,43 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
             pid[designed] = shared[designed]
             # designed constructs
             m = designed & ntc_pair
-            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = STATUS_PAIR_NTC, CLASS_NTC, gcfg.ntc_label, gcfg.ntc_label, DETAIL_DESIGNED_NTC, CONSTRUCT_NTC
+            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = (
+                STATUS_PAIR_NTC,
+                CLASS_NTC,
+                gcfg.ntc_label,
+                gcfg.ntc_label,
+                DETAIL_DESIGNED_NTC,
+                CONSTRUCT_NTC,
+            )
             m = designed & one_ntc
-            st[m], dt[m], ct[m], pc[m] = STATUS_PAIR_TARGET_NTC, DETAIL_DESIGNED_SINGLE_NTC, CONSTRUCT_SINGLE_NTC, target_of[m]
+            st[m], dt[m], ct[m], pc[m] = (
+                STATUS_PAIR_TARGET_NTC,
+                DETAIL_DESIGNED_SINGLE_NTC,
+                CONSTRUCT_SINGLE_NTC,
+                target_of[m],
+            )
             if gcfg.designed_targeting_plus_ntc_primary:
-                kl[m], tg[m] = CLASS_TARGETING, target_of[m]  # designed single-guide + NTC constructs are primary targeting labels
+                kl[m], tg[m] = (
+                    CLASS_TARGETING,
+                    target_of[m],
+                )  # designed single-guide + NTC constructs are primary targeting labels
             # else: kept as a designed construct but class stays ambiguous -> sensitivity stratum only
             m = designed & same & ~nA
-            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = STATUS_PAIR_TARGETING, CLASS_TARGETING, tA[m], tA[m], DETAIL_DESIGNED_DUAL, CONSTRUCT_DUAL
+            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = (
+                STATUS_PAIR_TARGETING,
+                CLASS_TARGETING,
+                tA[m],
+                tA[m],
+                DETAIL_DESIGNED_DUAL,
+                CONSTRUCT_DUAL,
+            )
             m = designed & two_targets
-            st[m], pc[m], dt[m], ct[m] = STATUS_DUAL_TARGET, two_label[m], DETAIL_DESIGNED_TWO_TARGETS, CONSTRUCT_TWO_TARGETS
+            st[m], pc[m], dt[m], ct[m] = (
+                STATUS_DUAL_TARGET,
+                two_label[m],
+                DETAIL_DESIGNED_TWO_TARGETS,
+                CONSTRUCT_TWO_TARGETS,
+            )
             # combinations that are not a designed construct: never assigned
             m = ~designed & two_targets
             st[m], pc[m], dt[m] = STATUS_DUAL_TARGET, two_label[m], DETAIL_TWO_TARGETS_NOT_DESIGNED
@@ -453,9 +533,23 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
         else:
             prov[:] = True
             m = ntc_pair
-            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = STATUS_PAIR_NTC, CLASS_NTC, gcfg.ntc_label, gcfg.ntc_label, DETAIL_PROVISIONAL_NTC, CONSTRUCT_NTC
+            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = (
+                STATUS_PAIR_NTC,
+                CLASS_NTC,
+                gcfg.ntc_label,
+                gcfg.ntc_label,
+                DETAIL_PROVISIONAL_NTC,
+                CONSTRUCT_NTC,
+            )
             m = same & ~nA
-            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = STATUS_PAIR_TARGETING, CLASS_TARGETING, tA[m], tA[m], DETAIL_PROVISIONAL_SAME, CONSTRUCT_DUAL
+            st[m], kl[m], tg[m], pc[m], dt[m], ct[m] = (
+                STATUS_PAIR_TARGETING,
+                CLASS_TARGETING,
+                tA[m],
+                tA[m],
+                DETAIL_PROVISIONAL_SAME,
+                CONSTRUCT_DUAL,
+            )
             m = one_ntc
             if gcfg.ntc_partner_policy == "provisional_target":
                 st[m], kl[m], ct[m] = STATUS_PAIR_TARGET_NTC_PROVISIONAL, CLASS_TARGETING, CONSTRUCT_SINGLE_NTC
@@ -465,15 +559,20 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
             pc[m], dt[m] = target_of[m], DETAIL_PROVISIONAL_TARGET_NTC
             m = two_targets
             st[m], pc[m], dt[m] = STATUS_DUAL_TARGET, two_label[m], DETAIL_PROVISIONAL_TWO
-        status[idx], klass[idx], target_call[idx], pair_call[idx], provisional[idx], pair_id_call[idx] = st, kl, tg, pc, prov, pid
+        status[idx], klass[idx], target_call[idx], pair_call[idx], provisional[idx], pair_id_call[idx] = (
+            st,
+            kl,
+            tg,
+            pc,
+            prov,
+            pid,
+        )
         detail[idx], construct_type[idx] = dt, ct
         assigned_pair = np.isin(kl, [CLASS_TARGETING, CLASS_NTC])
         guide_call[idx[assigned_pair]] = pair_label[assigned_pair]
         guide_call[idx[~assigned_pair]] = amb
-
     assert (status != "").all(), "every cell must receive a pair assignment status"
     assert (detail != "").all(), "every cell must receive a pair resolution detail"
-
     # ---- obs -------------------------------------------------------------------------
     expr.obs[OBS_TOP] = g_top
     expr.obs[OBS_SECOND] = g_second
@@ -481,7 +580,9 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
     expr.obs[OBS_NDETECTED] = detected
     expr.obs[OBS_GUIDE] = pd.Categorical(guide_call.astype(str))
     expr.obs[OBS_TARGET] = pd.Categorical(target_call.astype(str))
-    expr.obs[OBS_CLASS] = pd.Categorical(klass.astype(str), categories=[CLASS_TARGETING, CLASS_NTC, CLASS_AMBIGUOUS, CLASS_UNASSIGNED])
+    expr.obs[OBS_CLASS] = pd.Categorical(
+        klass.astype(str), categories=[CLASS_TARGETING, CLASS_NTC, CLASS_AMBIGUOUS, CLASS_UNASSIGNED]
+    )
     expr.obs[OBS_MODE] = pd.Categorical([MODE_PAIR] * n)
     for c in classes:
         s = slot[c]
@@ -496,7 +597,8 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
         expr.obs[OBS_SLOT_NSTRONG.format(c=c)] = s["n_strong"]
         expr.obs[OBS_SLOT_STATUS.format(c=c)] = pd.Categorical(
             np.where(s["resolved"], SLOT_RESOLVED, np.where(s["multiple"], SLOT_MULTIPLE, SLOT_NONE)).astype(str),
-            categories=[SLOT_RESOLVED, SLOT_MULTIPLE, SLOT_NONE])
+            categories=[SLOT_RESOLVED, SLOT_MULTIPLE, SLOT_NONE],
+        )
     expr.obs[OBS_PAIR_ID] = pd.Categorical(pair_id_call.astype(str))
     expr.obs[OBS_PAIR] = pd.Categorical(pair_call.astype(str))
     expr.obs[OBS_PAIR_STATUS] = pd.Categorical(status.astype(str))
@@ -504,47 +606,73 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
     expr.obs[OBS_PAIR_PRIMARY] = np.isin(klass, [CLASS_TARGETING, CLASS_NTC])
     expr.obs[OBS_PAIR_DETAIL] = pd.Categorical(detail.astype(str))
     if pair_map is not None and "target_symbol" in pair_map.columns:
-        sym_of_guide = pd.Series(pd.Index(guide_ids), index=pd.Index(guide_ids)).map(pair_map["target_symbol"].astype(str)).fillna("").to_numpy().astype(object)
+        sym_of_guide = (
+            pd.Series(pd.Index(guide_ids), index=pd.Index(guide_ids))
+            .map(pair_map["target_symbol"].astype(str))
+            .fillna("")
+            .to_numpy()
+            .astype(object)
+        )
         sym = np.full(n, "", dtype=object)
-        tmask = (klass == CLASS_TARGETING) | (status == STATUS_PAIR_TARGET_NTC)  # incl. designed targeting+NTC constructs (sensitivity)
+        tmask = (klass == CLASS_TARGETING) | (
+            status == STATUS_PAIR_TARGET_NTC
+        )  # incl. designed targeting+NTC constructs (sensitivity)
         if tmask.any():
             a_i, c_i = A["idx"][tmask], C["idx"][tmask]
             sym[tmask] = np.where(guide_ntc[a_i], sym_of_guide[c_i], sym_of_guide[a_i])
         sym[klass == CLASS_NTC] = gcfg.ntc_label
         expr.obs[OBS_TARGET_SYMBOL] = pd.Categorical(sym.astype(str))
-    expr.obs[OBS_CONSTRUCT_TYPE] = pd.Categorical(construct_type.astype(str), categories=[CONSTRUCT_DUAL, CONSTRUCT_SINGLE_NTC, CONSTRUCT_NTC, CONSTRUCT_TWO_TARGETS, CONSTRUCT_NONE])
-
+    expr.obs[OBS_CONSTRUCT_TYPE] = pd.Categorical(
+        construct_type.astype(str),
+        categories=[CONSTRUCT_DUAL, CONSTRUCT_SINGLE_NTC, CONSTRUCT_NTC, CONSTRUCT_TWO_TARGETS, CONSTRUCT_NONE],
+    )
     if gcfg.single_guide_diagnostic:
         sg_assigned = (g_top >= min_umi) & (g_top > float(gcfg.dominance_ratio) * g_second)
         if gcfg.max_second_umi is not None and gcfg.max_second_umi >= 0:
             sg_assigned &= g_second <= gcfg.max_second_umi
-        sg_class = np.where(sg_assigned, np.where(guide_ntc[g_top_idx], CLASS_NTC, CLASS_TARGETING),
-                            np.where(has_counts, CLASS_AMBIGUOUS, CLASS_UNASSIGNED)).astype(object)
-        sg_target = np.where(sg_assigned, np.where(guide_ntc[g_top_idx], gcfg.ntc_label, guide_targets[g_top_idx]),
-                             np.where(has_counts, amb, unl)).astype(object)
+        sg_class = np.where(
+            sg_assigned,
+            np.where(guide_ntc[g_top_idx], CLASS_NTC, CLASS_TARGETING),
+            np.where(has_counts, CLASS_AMBIGUOUS, CLASS_UNASSIGNED),
+        ).astype(object)
+        sg_target = np.where(
+            sg_assigned,
+            np.where(guide_ntc[g_top_idx], gcfg.ntc_label, guide_targets[g_top_idx]),
+            np.where(has_counts, amb, unl),
+        ).astype(object)
         sg_guide = np.where(sg_assigned, guide_ids[g_top_idx], np.where(has_counts, amb, unl)).astype(object)
-        expr.obs[OBS_SG_CLASS] = pd.Categorical(sg_class.astype(str), categories=[CLASS_TARGETING, CLASS_NTC, CLASS_AMBIGUOUS, CLASS_UNASSIGNED])
+        expr.obs[OBS_SG_CLASS] = pd.Categorical(
+            sg_class.astype(str), categories=[CLASS_TARGETING, CLASS_NTC, CLASS_AMBIGUOUS, CLASS_UNASSIGNED]
+        )
         expr.obs[OBS_SG_TARGET] = pd.Categorical(sg_target.astype(str))
         expr.obs[OBS_SG_GUIDE] = pd.Categorical(sg_guide.astype(str))
         logger.info("Single-guide diagnostic (not used downstream): %s", dict(pd.Series(sg_class).value_counts()))
-
     expr.uns["guide_assignment"] = {
-        "mode": MODE_PAIR, "primary_labels": "pair", "scaffold_classes": classes,
-        "pair_reference": str(ref_path or ""), "pair_reference_explicit_ids": bool(explicit),
-        "ntc_partner_policy": gcfg.ntc_partner_policy, "require_complete_pair": bool(gcfg.require_complete_pair),
-        "unresolved_pair_policy": gcfg.unresolved_pair_policy, "single_guide_diagnostic": bool(gcfg.single_guide_diagnostic),
-        "min_umi": int(gcfg.min_umi), "dominance_ratio": float(gcfg.dominance_ratio), "max_second_umi": int(gcfg.max_second_umi),
-        "pair_id_delimiter": gcfg.pair_id_delimiter, "dominance_pseudocount": float(getattr(gcfg, "dominance_pseudocount", 1.0)),
+        "mode": MODE_PAIR,
+        "primary_labels": "pair",
+        "scaffold_classes": classes,
+        "pair_reference": str(ref_path or ""),
+        "pair_reference_explicit_ids": bool(explicit),
+        "ntc_partner_policy": gcfg.ntc_partner_policy,
+        "require_complete_pair": bool(gcfg.require_complete_pair),
+        "unresolved_pair_policy": gcfg.unresolved_pair_policy,
+        "single_guide_diagnostic": bool(gcfg.single_guide_diagnostic),
+        "min_umi": int(gcfg.min_umi),
+        "dominance_ratio": float(gcfg.dominance_ratio),
+        "max_second_umi": int(gcfg.max_second_umi),
+        "pair_id_delimiter": gcfg.pair_id_delimiter,
+        "dominance_pseudocount": float(getattr(gcfg, "dominance_pseudocount", 1.0)),
         "designed_targeting_plus_ntc_primary": bool(gcfg.designed_targeting_plus_ntc_primary),
         "slot_rule": f"slot passes when top_umi >= {int(gcfg.min_umi)} and (top_umi + {float(getattr(gcfg, 'dominance_pseudocount', 1.0)):g}) / (second_umi + {float(getattr(gcfg, 'dominance_pseudocount', 1.0)):g}) >= {float(gcfg.dominance_ratio):g}, evaluated independently for scaffold A and scaffold C",
-        "rule": ("strongest guide per scaffold class must reach min_umi and exceed dominance_ratio x the class runner-up; "
-                 "explicit reference: valid pair = the two slot features share a designed construct id (designed dual-targeting, designed targeting+NTC and designed NTC-NTC constructs are assigned; "
-                 "two different targets -> dual_target_ambiguous; any other non-designed combination -> unresolved_pair, see pair_resolution_detail); "
-                 "provisional rule (no ids): same target -> pair_targeting, both NTC -> pair_non_targeting, targeting+NTC per ntc_partner_policy; "
-                 "incomplete, scaffold-ambiguous, dual-target and unresolved cells are excluded from primary testing"),
+        "rule": (
+            "strongest guide per scaffold class must reach min_umi and exceed dominance_ratio x the class runner-up; "
+            "explicit reference: valid pair = the two slot features share a designed construct id (designed dual-targeting, designed targeting+NTC and designed NTC-NTC constructs are assigned; "
+            "two different targets -> dual_target_ambiguous; any other non-designed combination -> unresolved_pair, see pair_resolution_detail); "
+            "provisional rule (no ids): same target -> pair_targeting, both NTC -> pair_non_targeting, targeting+NTC per ntc_partner_policy; "
+            "incomplete, scaffold-ambiguous, dual-target and unresolved cells are excluded from primary testing"
+        ),
     }
-
-    for obj in ({id(aligned): aligned, id(guides): guides}.values()):
+    for obj in {id(aligned): aligned, id(guides): guides}.values():
         obj.var["target_gene"] = guide_targets
         obj.var["is_non_targeting"] = guide_ntc
         obj.var["scaffold"] = guide_scaf
@@ -553,25 +681,32 @@ def assign_guide_pairs(expr: ad.AnnData, guides: ad.AnnData, cfg: Config) -> ad.
             ids_all = pd.Index(obj.var_names.astype(str))
             for col in _EXTRA_REF_COLUMNS:
                 if col in pair_map.columns:
-                    obj.var[col] = pd.Series(ids_all, index=ids_all).map(pair_map[col].astype(str)).fillna("").to_numpy().astype(str)
+                    obj.var[col] = (
+                        pd.Series(ids_all, index=ids_all)
+                        .map(pair_map[col].astype(str))
+                        .fillna("")
+                        .to_numpy()
+                        .astype(str)
+                    )
     aligned.obs[OBS_GUIDE] = expr.obs[OBS_GUIDE].to_numpy()
     aligned.obs[OBS_TARGET] = expr.obs[OBS_TARGET].to_numpy()
-
     counts = pd.Series(status).value_counts()
     logger.info("Pair assignment status: %s", ", ".join(f"{k}={int(v)}" for k, v in counts.items()))
     _log_assignment(expr, cfg)
     return expr
 
 
-# ---------------------------------------------------------------------------
 # Summaries
-# ---------------------------------------------------------------------------
 
 
 def pair_assignment_summary(expr: ad.AnnData) -> Optional[pd.DataFrame]:
     if OBS_PAIR_STATUS not in expr.obs.columns:
         return None
-    df = (expr.obs.groupby([OBS_PAIR_STATUS, OBS_CLASS, OBS_PAIR_PROVISIONAL], observed=True).size().reset_index(name="n_cells"))
+    df = (
+        expr.obs.groupby([OBS_PAIR_STATUS, OBS_CLASS, OBS_PAIR_PROVISIONAL], observed=True)
+        .size()
+        .reset_index(name="n_cells")
+    )
     df["pct_of_cells"] = 100.0 * df["n_cells"] / max(expr.n_obs, 1)
     order = {s: i for i, s in enumerate(PAIR_STATUS_ORDER)}
     df["_o"] = df[OBS_PAIR_STATUS].astype(str).map(lambda s: order.get(s, len(order)))
@@ -593,10 +728,27 @@ def pair_assignment_per_lane(expr: ad.AnnData, lane_key: str = "lane_id") -> Opt
             prim.loc["ALL"] = int(prim.sum())
         tab.insert(1, "n_pair_assigned_primary", prim.reindex(tab.index).fillna(0).astype(int).to_numpy())
     else:
-        tab.insert(1, "n_pair_assigned_primary", tab.get(STATUS_PAIR_TARGETING, 0) + tab.get(STATUS_PAIR_NTC, 0) + tab.get(STATUS_PAIR_TARGET_NTC_PROVISIONAL, 0))
+        tab.insert(
+            1,
+            "n_pair_assigned_primary",
+            tab.get(STATUS_PAIR_TARGETING, 0)
+            + tab.get(STATUS_PAIR_NTC, 0)
+            + tab.get(STATUS_PAIR_TARGET_NTC_PROVISIONAL, 0),
+        )
     tab.insert(2, "frac_strict_primary_pair", tab["n_pair_assigned_primary"] / tab["n_cells"])
-    tab.insert(2, "frac_complete_pair", (tab.get(STATUS_PAIR_TARGETING, 0) + tab.get(STATUS_PAIR_NTC, 0) + tab.get(STATUS_PAIR_TARGET_NTC, 0)
-                                          + tab.get(STATUS_PAIR_TARGET_NTC_PROVISIONAL, 0) + tab.get(STATUS_DUAL_TARGET, 0) + tab.get(STATUS_UNRESOLVED, 0)) / tab["n_cells"])
+    tab.insert(
+        2,
+        "frac_complete_pair",
+        (
+            tab.get(STATUS_PAIR_TARGETING, 0)
+            + tab.get(STATUS_PAIR_NTC, 0)
+            + tab.get(STATUS_PAIR_TARGET_NTC, 0)
+            + tab.get(STATUS_PAIR_TARGET_NTC_PROVISIONAL, 0)
+            + tab.get(STATUS_DUAL_TARGET, 0)
+            + tab.get(STATUS_UNRESOLVED, 0)
+        )
+        / tab["n_cells"],
+    )
     tab.insert(3, "frac_incomplete_pair", tab.get(STATUS_INCOMPLETE, 0) / tab["n_cells"])
     return tab.reset_index().rename(columns={lane_key: "lane_id"})
 
@@ -609,7 +761,7 @@ def pair_resolution_detail_table(expr: ad.AnnData, lane_key: str = "lane_id") ->
     df = expr.obs.groupby(keys, observed=True).size().reset_index(name="n_cells_all")
     if lane_key in expr.obs.columns:
         per = pd.crosstab([expr.obs[k].astype(str) for k in keys], expr.obs[lane_key].astype(str)).reset_index()
-        per.columns = keys + [f"n_cells_{c}" for c in per.columns[len(keys):]]
+        per.columns = keys + [f"n_cells_{c}" for c in per.columns[len(keys) :]]
         for k in keys:
             df[k] = df[k].astype(str)
         df = df.merge(per, on=keys, how="left")
@@ -630,7 +782,9 @@ def single_guide_diagnostic_table(expr: ad.AnnData) -> Optional[pd.DataFrame]:
     ct.index.name = "single_guide_diagnostic_class"
     out = ct.reset_index()
     out.insert(1, "n_cells", ct.sum(axis=1).to_numpy())
-    same_t = ((expr.obs[OBS_SG_CLASS].astype(str) == CLASS_TARGETING) & (expr.obs[OBS_CLASS].astype(str) == CLASS_TARGETING))
+    same_t = (expr.obs[OBS_SG_CLASS].astype(str) == CLASS_TARGETING) & (
+        expr.obs[OBS_CLASS].astype(str) == CLASS_TARGETING
+    )
     agree = int((same_t & (expr.obs[OBS_SG_TARGET].astype(str) == expr.obs[OBS_TARGET].astype(str))).sum())
     out.attrs["targeting_in_both_same_target"] = agree
     out.attrs["targeting_in_both_different_target"] = int(same_t.sum()) - agree

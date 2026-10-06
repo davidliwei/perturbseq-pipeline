@@ -7,6 +7,7 @@ reproducibility. Figures are referenced by their path relative to the run
 directory (``figures/<section>/<name>.png``) so the file renders in any
 Markdown viewer next to the run outputs.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,13 +17,7 @@ from typing import Iterable, List, Optional
 
 import pandas as pd
 
-from .plots import (
-    SECTION_CLUSTERING,
-    SECTION_GUIDES,
-    SECTION_PERTURBATION,
-    SECTION_QC,
-    FigureRegistry,
-)
+from .plots import SECTION_CLUSTERING, SECTION_GUIDES, SECTION_PERTURBATION, SECTION_QC, FigureRegistry
 from .report import ReportInputs, _versions
 
 logger = logging.getLogger(__name__)
@@ -54,7 +49,9 @@ def md_table(df: Optional[pd.DataFrame], max_rows: int = 60, max_cols: int = 24)
     return "\n".join(lines) + "\n"
 
 
-def _figs(reg: FigureRegistry, section: str, run_dir: Path, names: Optional[Iterable[str]] = None, only_in_report: bool = True) -> str:
+def _figs(
+    reg: FigureRegistry, section: str, run_dir: Path, names: Optional[Iterable[str]] = None, only_in_report: bool = True
+) -> str:
     recs = reg.by_section(section, only_in_report=only_in_report)
     if names is not None:
         wanted = list(names)
@@ -73,69 +70,235 @@ def write_markdown_report(inputs: ReportInputs, path: Path) -> Path:
     T = lambda k, n=60: md_table(tables.get(k), n)
     pair_mode = "pair_assignment_per_lane" in tables
     L: List[str] = []
-    L += [f"# {cfg.report.title}", "", f"Run `{cfg.run.name}` — generated {datetime.now():%Y-%m-%d %H:%M}. HTML report: `{cfg.output.report_name}`.", ""]
-    L += ["## Run summary", "", md_table(pd.DataFrame(inputs.summary_cards, columns=["item", "value"]) if inputs.summary_cards else None, 40)]
-    L += [f"- input mode: `{inputs.input_mode}`; lanes: {inputs.lanes}", f"- input source: {inputs.input_source}", f"- sample metadata: `{inputs.metadata_source or 'none'}`", f"- guide source: {inputs.guide_source_text}", ""]
+    L += [
+        f"# {cfg.report.title}",
+        "",
+        f"Run `{cfg.run.name}` — generated {datetime.now():%Y-%m-%d %H:%M}. HTML report: `{cfg.output.report_name}`.",
+        "",
+    ]
+    L += [
+        "## Run summary",
+        "",
+        md_table(pd.DataFrame(inputs.summary_cards, columns=["item", "value"]) if inputs.summary_cards else None, 40),
+    ]
+    L += [
+        f"- input mode: `{inputs.input_mode}`; lanes: {inputs.lanes}",
+        f"- input source: {inputs.input_source}",
+        f"- sample metadata: `{inputs.metadata_source or 'none'}`",
+        f"- guide source: {inputs.guide_source_text}",
+        "",
+    ]
     if inputs.warnings:
         L += ["### Warnings", ""] + [f"- {w}" for w in inputs.warnings] + [""]
-
     # ---- expression QC --------------------------------------------------------------------------
-    L += ["## 1. Expression QC before filtering", "",
-          f"Thresholds: permissive gene filter >= {cfg.qc.min_genes_per_cell} genes, final gene filter >= {cfg.qc.min_genes_final} genes, mitochondrial < {cfg.qc.max_pct_mt} %, genes kept if in >= {cfg.qc.min_cells_per_gene} cells.", "",
-          "Cell accounting (input / permissive / final gene filter / mitochondrial / retained):", "", T("cell_counts_before_after"),
-          "QC metrics per lane before and after filtering (medians and means of total UMIs, detected genes, % mitochondrial, % ribosomal, % haemoglobin):", "", T("qc_metrics_per_lane_before_after"),
-          _figs(reg, SECTION_QC, run_dir, ["cell_counts_before_after_per_lane", "qc_violin_before_filtering", "qc_scatter_before_filtering", "qc_cells_per_lane_before_filtering", "pct_mt_vs_genes_and_umis"]), ""]
-    L += ["## 2. Expression QC after filtering", "", T("qc_steps"), T("qc_summary"),
-          _figs(reg, SECTION_QC, run_dir, ["qc_violin_after_filtering", "qc_scatter_after_filtering", "qc_cells_per_lane_after_filtering", "genes_vs_umis_before_after", "ecdf_total_counts_before_after", "ecdf_n_genes_by_counts_before_after",
-                                            "ecdf_pct_counts_mt_before_after", "ecdf_pct_counts_ribo_before_after", "ecdf_pct_counts_hb_before_after"]), ""]
-
+    L += [
+        "## 1. Expression QC before filtering",
+        "",
+        f"Thresholds: permissive gene filter >= {cfg.qc.min_genes_per_cell} genes, final gene filter >= {cfg.qc.min_genes_final} genes, mitochondrial < {cfg.qc.max_pct_mt} %, genes kept if in >= {cfg.qc.min_cells_per_gene} cells.",
+        "",
+        "Cell accounting (input / permissive / final gene filter / mitochondrial / retained):",
+        "",
+        T("cell_counts_before_after"),
+        "QC metrics per lane before and after filtering (medians and means of total UMIs, detected genes, % mitochondrial, % ribosomal, % haemoglobin):",
+        "",
+        T("qc_metrics_per_lane_before_after"),
+        _figs(
+            reg,
+            SECTION_QC,
+            run_dir,
+            [
+                "cell_counts_before_after_per_lane",
+                "qc_violin_before_filtering",
+                "qc_scatter_before_filtering",
+                "qc_cells_per_lane_before_filtering",
+                "pct_mt_vs_genes_and_umis",
+            ],
+        ),
+        "",
+    ]
+    L += [
+        "## 2. Expression QC after filtering",
+        "",
+        T("qc_steps"),
+        T("qc_summary"),
+        _figs(
+            reg,
+            SECTION_QC,
+            run_dir,
+            [
+                "qc_violin_after_filtering",
+                "qc_scatter_after_filtering",
+                "qc_cells_per_lane_after_filtering",
+                "genes_vs_umis_before_after",
+                "ecdf_total_counts_before_after",
+                "ecdf_n_genes_by_counts_before_after",
+                "ecdf_pct_counts_mt_before_after",
+                "ecdf_pct_counts_ribo_before_after",
+                "ecdf_pct_counts_hb_before_after",
+            ],
+        ),
+        "",
+    ]
     # ---- pair-guide QC ---------------------------------------------------------------------------
     if pair_mode:
-        L += ["## 3. Pair-guide QC", "",
-              f"Assignment rule: strongest guide per scaffold class needs >= {cfg.guides.min_umi} UMIs and > {cfg.guides.dominance_ratio} x the class runner-up; a cell is a designed pair only when the two slot features share a construct id "
-              f"(pair reference `{cfg.guides.pair_map_file or cfg.guides.pair_reference}`). Primary labels: `pair_targeting` / `pair_targeting_plus_ntc` (designed targeting constructs) and `pair_non_targeting` (designed NTC pairs).", "",
-              "Pair-assignment status per lane:", "", T("pair_assignment_per_lane"), "Pair-guide QC per lane (guide UMIs, detected guides, scaffold detection, complete / incomplete pairs, ambiguity, unknown, unresolved, below threshold, no guide):", "", T("pair_guide_qc_per_lane"),
-              "Construct type per lane:", "", T("construct_type_per_lane"), "Strong guides per scaffold slot:", "", T("strong_guides_per_scaffold_per_lane"),
-              "Guide / GEX barcode overlap:", "", T("guide_gex_barcode_overlap"), "Guide UMI mass by feature role (designed slot / wrong-scaffold chimera / never-cloned spacer):", "", T("off_design_umi_fraction_per_lane"),
-              "Cells per target (primary targeting pairs):", "", T("target_cells_per_lane", 80), "Cells per construct (designed pairs):", "", T("construct_cells_per_lane", 80),
-              "Feature-level representation (all count-matrix features; full table in `tables/guide_feature_representation.csv`):", "", T("guide_feature_representation", 40),
-              _figs(reg, SECTION_GUIDES, run_dir), ""]
+        L += [
+            "## 3. Pair-guide QC",
+            "",
+            f"Assignment rule: strongest guide per scaffold class needs >= {cfg.guides.min_umi} UMIs and > {cfg.guides.dominance_ratio} x the class runner-up; a cell is a designed pair only when the two slot features share a construct id "
+            f"(pair reference `{cfg.guides.pair_map_file or cfg.guides.pair_reference}`). Primary labels: `pair_targeting` / `pair_targeting_plus_ntc` (designed targeting constructs) and `pair_non_targeting` (designed NTC pairs).",
+            "",
+            "Pair-assignment status per lane:",
+            "",
+            T("pair_assignment_per_lane"),
+            "Pair-guide QC per lane (guide UMIs, detected guides, scaffold detection, complete / incomplete pairs, ambiguity, unknown, unresolved, below threshold, no guide):",
+            "",
+            T("pair_guide_qc_per_lane"),
+            "Construct type per lane:",
+            "",
+            T("construct_type_per_lane"),
+            "Strong guides per scaffold slot:",
+            "",
+            T("strong_guides_per_scaffold_per_lane"),
+            "Guide / GEX barcode overlap:",
+            "",
+            T("guide_gex_barcode_overlap"),
+            "Guide UMI mass by feature role (designed slot / wrong-scaffold chimera / never-cloned spacer):",
+            "",
+            T("off_design_umi_fraction_per_lane"),
+            "Cells per target (primary targeting pairs):",
+            "",
+            T("target_cells_per_lane", 80),
+            "Cells per construct (designed pairs):",
+            "",
+            T("construct_cells_per_lane", 80),
+            "Feature-level representation (all count-matrix features; full table in `tables/guide_feature_representation.csv`):",
+            "",
+            T("guide_feature_representation", 40),
+            _figs(reg, SECTION_GUIDES, run_dir),
+            "",
+        ]
         det = tables.get("pair_resolution_detail_per_lane")
-        L += ["## 4. Pair ambiguity and unresolved assignments", "",
-              "Every cell carries `pair_assignment_status` and `pair_resolution_detail`; only `perturbation_class in {targeting, non-targeting}` enters primary testing. Everything else (dual-target ambiguous, scaffold-ambiguous, incomplete, unresolved / not designed, unknown guide, below threshold, no guide) is excluded and listed here.", "",
-              md_table(det[~det["enters_primary_testing"].astype(bool)] if det is not None and "enters_primary_testing" in det.columns else det, 80),
-              "Designed constructs that entered primary testing:", "", md_table(det[det["enters_primary_testing"].astype(bool)] if det is not None and "enters_primary_testing" in det.columns else None, 40), ""]
-        L += ["## 5. Single-guide diagnostic (not used for any result)", "", T("single_guide_diagnostic_vs_pair"), _figs(reg, SECTION_GUIDES, run_dir, ["single_guide_diagnostic_vs_pair_status"]), ""]
+        L += [
+            "## 4. Pair ambiguity and unresolved assignments",
+            "",
+            "Every cell carries `pair_assignment_status` and `pair_resolution_detail`; only `perturbation_class in {targeting, non-targeting}` enters primary testing. Everything else (dual-target ambiguous, scaffold-ambiguous, incomplete, unresolved / not designed, unknown guide, below threshold, no guide) is excluded and listed here.",
+            "",
+            md_table(
+                det[~det["enters_primary_testing"].astype(bool)]
+                if det is not None and "enters_primary_testing" in det.columns
+                else det,
+                80,
+            ),
+            "Designed constructs that entered primary testing:",
+            "",
+            md_table(
+                det[det["enters_primary_testing"].astype(bool)]
+                if det is not None and "enters_primary_testing" in det.columns
+                else None,
+                40,
+            ),
+            "",
+        ]
+        L += [
+            "## 5. Single-guide diagnostic (not used for any result)",
+            "",
+            T("single_guide_diagnostic_vs_pair"),
+            _figs(reg, SECTION_GUIDES, run_dir, ["single_guide_diagnostic_vs_pair_status"]),
+            "",
+        ]
     else:
-        L += ["## 3. Guide assignment", "", T("guide_qc"), T("guide_assignment"), T("assignment_per_lane"), _figs(reg, SECTION_GUIDES, run_dir), ""]
-
+        L += [
+            "## 3. Guide assignment",
+            "",
+            T("guide_qc"),
+            T("guide_assignment"),
+            T("assignment_per_lane"),
+            _figs(reg, SECTION_GUIDES, run_dir),
+            "",
+        ]
     # ---- clustering --------------------------------------------------------------------------------
-    L += ["## 6. PCA, UMAP and Leiden clustering", "",
-          f"Normalisation (target_sum = {cfg.cluster.target_sum or 'median'}), log1p, {cfg.cluster.n_top_genes} highly variable genes, {cfg.cluster.n_pcs} PCs, {cfg.cluster.n_neighbors} neighbours, UMAP (min_dist {cfg.cluster.umap_min_dist}), Leiden resolution {cfg.cluster.leiden_resolution}; batch_key = {cfg.cluster.batch_key} (no Harmony).", "",
-          "Cluster sizes:", "", T("cluster_sizes", 60), "Cluster composition (by sample, pair status, assignment class):", "", T("cluster_composition", 80), _figs(reg, SECTION_CLUSTERING, run_dir), ""]
-
+    L += [
+        "## 6. PCA, UMAP and Leiden clustering",
+        "",
+        f"Normalisation (target_sum = {cfg.cluster.target_sum or 'median'}), log1p, {cfg.cluster.n_top_genes} highly variable genes, {cfg.cluster.n_pcs} PCs, {cfg.cluster.n_neighbors} neighbours, UMAP (min_dist {cfg.cluster.umap_min_dist}), Leiden resolution {cfg.cluster.leiden_resolution}; batch_key = {cfg.cluster.batch_key} (no Harmony).",
+        "",
+        "Cluster sizes:",
+        "",
+        T("cluster_sizes", 60),
+        "Cluster composition (by sample, pair status, assignment class):",
+        "",
+        T("cluster_composition", 80),
+        _figs(reg, SECTION_CLUSTERING, run_dir),
+        "",
+    ]
     # ---- perturbation -----------------------------------------------------------------------------
     L += ["## 7. ECDF analysis", ""]
     ecdf_dir = run_dir / "figures" / "perturbation" / "ecdf"
     ecdfs = sorted(ecdf_dir.glob("ecdf_*.png")) if ecdf_dir.is_dir() else []
-    L += [f"Per-target ECDFs (targeting pairs vs NTC pairs, per lane and pooled): {len(ecdfs)} figures in `figures/perturbation/ecdf/`.", ""]
+    L += [
+        f"Per-target ECDFs (targeting pairs vs NTC pairs, per lane and pooled): {len(ecdfs)} figures in `figures/perturbation/ecdf/`.",
+        "",
+    ]
     L += [f"- [{p.stem.replace('ecdf_', '')}]({p.relative_to(run_dir).as_posix()})" for p in ecdfs] + [""]
-    L += [_figs(reg, SECTION_PERTURBATION, run_dir, ["pair_ecdf_overview_top_targets", "pair_level_expression_distributions"]), ""]
-    L += ["## 8. Perturbation-expression analysis (FDR, log2FC)", "",
-          f"Test: two-sided Kolmogorov-Smirnov and one-sided Mann-Whitney (perturbed < control) on the target transcript (log-normalised expression), targeting pairs vs NTC pairs; log2FC on de-logged means with pseudocount; BH FDR within lane x control x stratum; "
-          f"hit = `fdr_ks < {cfg.perturbation.fdr_alpha}` and `log2fc < {cfg.perturbation.max_log2fc_for_hit}`; minimum {cfg.perturbation.min_cells_per_target} target cells and {cfg.perturbation.min_control_cells} control cells. "
-          "`neg_log10_fdr = -log10(max(fdr_ks, 1e-300))`.", "",
-          "Hit counts per lane:", "", T("pair_perturbation_hit_counts_per_lane"),
-          "Target-level primary results (all lanes; full table `tables/pair_perturbation_by_target.csv` includes every stratum and the 'other targets' control):", "", T("pair_perturbation_primary", 200),
-          "Guide-pair (construct) level results (`tables/pair_perturbation_by_pair.csv`):", "", T("pair_perturbation_by_pair", 60),
-          _figs(reg, SECTION_PERTURBATION, run_dir, ["pair_volcano_target_level", "pair_volcano_pair_level", "pair_waterfall_target_log2fc", "pair_heatmap_log2fc_by_lane", "pair_heatmap_neg_log10_fdr_by_lane", "pair_hit_counts_per_lane", "pair_level_hit_counts_per_lane"]),
-          "Pipeline single-assignment perturbation table (same labels, pipeline default statistics):", "", T("perturbation", 60), T("skipped", 30), ""]
+    L += [
+        _figs(
+            reg,
+            SECTION_PERTURBATION,
+            run_dir,
+            ["pair_ecdf_overview_top_targets", "pair_level_expression_distributions"],
+        ),
+        "",
+    ]
+    L += [
+        "## 8. Perturbation-expression analysis (FDR, log2FC)",
+        "",
+        f"Test: two-sided Kolmogorov-Smirnov and one-sided Mann-Whitney (perturbed < control) on the target transcript (log-normalised expression), targeting pairs vs NTC pairs; log2FC on de-logged means with pseudocount; BH FDR within lane x control x stratum; "
+        f"hit = `fdr_ks < {cfg.perturbation.fdr_alpha}` and `log2fc < {cfg.perturbation.max_log2fc_for_hit}`; minimum {cfg.perturbation.min_cells_per_target} target cells and {cfg.perturbation.min_control_cells} control cells. "
+        "`neg_log10_fdr = -log10(max(fdr_ks, 1e-300))`.",
+        "",
+        "Hit counts per lane:",
+        "",
+        T("pair_perturbation_hit_counts_per_lane"),
+        "Target-level primary results (all lanes; full table `tables/pair_perturbation_by_target.csv` includes every stratum and the 'other targets' control):",
+        "",
+        T("pair_perturbation_primary", 200),
+        "Guide-pair (construct) level results (`tables/pair_perturbation_by_pair.csv`):",
+        "",
+        T("pair_perturbation_by_pair", 60),
+        _figs(
+            reg,
+            SECTION_PERTURBATION,
+            run_dir,
+            [
+                "pair_volcano_target_level",
+                "pair_volcano_pair_level",
+                "pair_waterfall_target_log2fc",
+                "pair_heatmap_log2fc_by_lane",
+                "pair_heatmap_neg_log10_fdr_by_lane",
+                "pair_hit_counts_per_lane",
+                "pair_level_hit_counts_per_lane",
+            ],
+        ),
+        "Pipeline single-assignment perturbation table (same labels, pipeline default statistics):",
+        "",
+        T("perturbation", 60),
+        T("skipped", 30),
+        "",
+    ]
     L += ["## 9. Target support within this run", "", T("target_support_matrix", 80), ""]
     if "enrichment" in tables:
         L += ["## 10. Cluster enrichment", "", T("enrichment", 60), ""]
-
     # ---- reproducibility --------------------------------------------------------------------------
-    L += ["## Outputs and reproducibility", ""] + [f"- {k}: `{v}`" for k, v in inputs.outputs.items()] + ["", f"- resolved configuration: `logs/resolved_config.yaml`; run manifest: `logs/run_manifest.json`; log: `logs/run.log`", f"- package versions: {_versions()}", ""]
+    L += (
+        ["## Outputs and reproducibility", ""]
+        + [f"- {k}: `{v}`" for k, v in inputs.outputs.items()]
+        + [
+            "",
+            f"- resolved configuration: `logs/resolved_config.yaml`; run manifest: `logs/run_manifest.json`; log: `logs/run.log`",
+            f"- package versions: {_versions()}",
+            "",
+        ]
+    )
     if inputs.provenance_rows:
         L += ["### Provenance", "", md_table(pd.DataFrame(inputs.provenance_rows, columns=["item", "value"]), 40)]
     L += ["### Module completion status", "", md_table(inputs.module_status, 40)]

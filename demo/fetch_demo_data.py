@@ -33,11 +33,7 @@ def find_mtx_dirs(root: Path) -> Dict[str, Path]:
     for matrix in sorted(root.rglob("matrix.mtx*")):
         d = matrix.parent
         has_barcodes = any((d / f"barcodes.tsv{s}").is_file() for s in ("", ".gz"))
-        has_features = any(
-            (d / f"{n}.tsv{s}").is_file()
-            for n in ("features", "genes")
-            for s in ("", ".gz")
-        )
+        has_features = any((d / f"{n}.tsv{s}").is_file() for n in ("features", "genes") for s in ("", ".gz"))
         if not (has_barcodes and has_features):
             continue
         lane = d.name
@@ -58,16 +54,13 @@ def _drive_folder_name() -> str | None:
     """
     import os
     import tempfile
-
     import gdown
 
     with tempfile.TemporaryDirectory() as tmp:
         cwd = os.getcwd()
         try:
             os.chdir(tmp)
-            listing = gdown.download_folder(
-                DEMO_FOLDER_URL, skip_download=True, quiet=True, use_cookies=False
-            )
+            listing = gdown.download_folder(DEMO_FOLDER_URL, skip_download=True, quiet=True, use_cookies=False)
         finally:
             os.chdir(cwd)
         if not listing:
@@ -91,7 +84,6 @@ def download(dest: Path) -> None:
             "  pip install gdown\n"
             "Or pass --source PATH if you already have the data locally."
         )
-
     dest.mkdir(parents=True, exist_ok=True)
     print(f"Downloading demo data from {DEMO_FOLDER_URL}\n  into {dest} ...")
     try:
@@ -99,9 +91,7 @@ def download(dest: Path) -> None:
         target = dest / name if name else dest
         if name:
             target.mkdir(parents=True, exist_ok=True)
-        gdown.download_folder(
-            DEMO_FOLDER_URL, output=str(target), quiet=False, use_cookies=False
-        )
+        gdown.download_folder(DEMO_FOLDER_URL, output=str(target), quiet=False, use_cookies=False)
     except SystemExit:
         raise
     except Exception as exc:
@@ -132,7 +122,6 @@ def copy_from_source(source: Path, dest: Path) -> None:
 def write_config(mtx_dirs: Dict[str, Path], path: Path, metadata: Path, outdir: str) -> None:
     """Write a runnable config with the discovered paths filled in."""
     import yaml
-
     from perturbseq_pipeline.config import Config
 
     template = REPO_ROOT / "config" / "demo.yaml"
@@ -141,7 +130,6 @@ def write_config(mtx_dirs: Dict[str, Path], path: Path, metadata: Path, outdir: 
     cfg.input.mtx_dirs = {lane: str(p) for lane, p in sorted(mtx_dirs.items())}
     cfg.run.outdir = outdir
     cfg.metadata.file = str(metadata) if metadata.is_file() else None
-
     # Catch a lane/metadata mismatch now rather than part-way through a run.
     if cfg.metadata.file:
         import pandas as pd
@@ -160,7 +148,6 @@ def write_config(mtx_dirs: Dict[str, Path], path: Path, metadata: Path, outdir: 
                 f"Multi-lane runs require metadata for every lane. Add the rows, "
                 f"or pass --metadata with a file that covers them."
             )
-
     cfg.validate()
     cfg.dump_yaml(path)
     print(f"\nWrote config: {path}")
@@ -175,7 +162,6 @@ def main(argv: List[str] | None = None) -> int:
     p.add_argument("--outdir", default="results/demo", help="run.outdir for the written config")
     p.add_argument("--metadata", default=str(DEFAULT_METADATA), help="sample metadata CSV")
     args = p.parse_args(argv)
-
     dest = Path(args.dest)
     if args.source:
         copy_from_source(Path(args.source), dest)
@@ -183,7 +169,6 @@ def main(argv: List[str] | None = None) -> int:
         print(f"Demo data already present in {dest}; skipping download.")
     else:
         download(dest)
-
     mtx_dirs = find_mtx_dirs(dest)
     if not mtx_dirs:
         sys.exit(
@@ -195,7 +180,6 @@ def main(argv: List[str] | None = None) -> int:
     for lane, d in sorted(mtx_dirs.items()):
         size = sum(f.stat().st_size for f in d.iterdir() if f.is_file()) / 1e6
         print(f"  {lane:12s} {d}  ({size:.0f} MB)")
-
     write_config(mtx_dirs, Path(args.write_config), Path(args.metadata), args.outdir)
     print("Now run:\n  perturbseq-pipeline run --config " + args.write_config)
     return 0

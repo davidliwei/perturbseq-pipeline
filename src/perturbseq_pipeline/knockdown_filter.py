@@ -92,19 +92,8 @@ STATUS_FAILED_GROUP = "failed_group"
 STATUS_LOW_EXPRESSION = "low_control_expression"
 STATUS_NOT_MEASURED = "not_measured"
 
-KEEP_STATUSES = (
-    STATUS_CONTROL,
-    STATUS_UNTOUCHED,
-    STATUS_KNOCKDOWN,
-    STATUS_NON_TESTABLE,
-    STATUS_UNFILTERED_CONTEXT,
-)
-ALL_STATUSES = KEEP_STATUSES + (
-    STATUS_ESCAPER,
-    STATUS_FAILED_GROUP,
-    STATUS_LOW_EXPRESSION,
-    STATUS_NOT_MEASURED,
-)
+KEEP_STATUSES = (STATUS_CONTROL, STATUS_UNTOUCHED, STATUS_KNOCKDOWN, STATUS_NON_TESTABLE, STATUS_UNFILTERED_CONTEXT)
+ALL_STATUSES = KEEP_STATUSES + (STATUS_ESCAPER, STATUS_FAILED_GROUP, STATUS_LOW_EXPRESSION, STATUS_NOT_MEASURED)
 
 #: Stage-5 columns copied into the table and ``obs`` (suffixed with the control).
 _STRENGTH_COLUMNS = ("log2fc", "pct_knockdown", "ks_fdr", "is_hit")
@@ -129,8 +118,7 @@ def _contexts(expr: ad.AnnData, cfg: Config) -> np.ndarray:
         return np.full(expr.n_obs, ALL_CONTEXTS, dtype=object)
     if key not in expr.obs.columns:
         raise ValueError(
-            f"knockdown_filter.context_key {key!r} is not an obs column; "
-            f"available: {sorted(expr.obs.columns)}"
+            f"knockdown_filter.context_key {key!r} is not an obs column; available: {sorted(expr.obs.columns)}"
         )
     values = expr.obs[key]
     if values.isna().any():
@@ -141,16 +129,12 @@ def _contexts(expr: ad.AnnData, cfg: Config) -> np.ndarray:
     return values.astype(str).to_numpy()
 
 
-def _mark_group(
-    status: np.ndarray, ratio: np.ndarray, cells: np.ndarray, max_cell_ratio: float
-) -> None:
+def _mark_group(status: np.ndarray, ratio: np.ndarray, cells: np.ndarray, max_cell_ratio: float) -> None:
     """Step 2: split a passing group into knockdowns and escapers."""
     status[cells] = np.where(ratio[cells] < max_cell_ratio, STATUS_KNOCKDOWN, STATUS_ESCAPER)
 
 
-# ---------------------------------------------------------------------------
 # count_model
-# ---------------------------------------------------------------------------
 
 
 def _raw_target_columns(expr: ad.AnnData, genes: List[str]) -> sparse.csc_matrix:
@@ -201,7 +185,6 @@ def _control_fit(counts: sparse.csr_matrix, s: np.ndarray) -> Tuple[np.ndarray, 
     mu, log_gene = _log_gene_wise_phi(counts, s)
     expressed = np.isfinite(log_gene)
     phi = np.full(mu.shape, np.nan)
-
     halves = np.random.default_rng(0).permutation(counts.shape[0]) % 2 == 0
     _, log_a = _log_gene_wise_phi(counts[halves], s[halves])
     _, log_b = _log_gene_wise_phi(counts[~halves], s[~halves])
@@ -214,7 +197,6 @@ def _control_fit(counts: sparse.csr_matrix, s: np.ndarray) -> Tuple[np.ndarray, 
     centres = np.array([np.median(log_mu[b]) for b in bins])
     var_per_bin = np.array([np.mean(half_diff2[b]) / 4 for b in bins])
     sampling_var = np.interp(np.log(mu[expressed]), centres, var_per_bin)
-
     m, log_g = mu[expressed], log_gene[expressed]
     # Fit the trend on genes with at least 0.1 counts per cell on average.
     use = m * np.mean(s) >= 0.1
@@ -225,7 +207,6 @@ def _control_fit(counts: sparse.csr_matrix, s: np.ndarray) -> Tuple[np.ndarray, 
         loss="soft_l1",
     )
     log_trend = np.log(fit.x[0] + fit.x[1] / m)
-
     spread = float(np.var(log_g[use] - log_trend[use]))
     prior_var = max(spread - float(np.mean(sampling_var[use])), 0.25)
     # Precision-weighted average of gene-wise and trend; written with the weight on
@@ -243,13 +224,7 @@ def _nb_logpmf(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> np.ndarray:
     two agree to far below the precision that matters here.
     """
     r = 1.0 / np.maximum(phi, 1e-8)
-    return (
-        gammaln(x + r)
-        - gammaln(r)
-        - gammaln(x + 1)
-        - r * np.log1p(mean / r)
-        + x * np.log(mean / (r + mean))
-    )
+    return gammaln(x + r) - gammaln(r) - gammaln(x + 1) - r * np.log1p(mean / r) + x * np.log(mean / (r + mean))
 
 
 def _fit_mixture(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> Tuple[float, float, np.ndarray]:
@@ -266,7 +241,6 @@ def _fit_mixture(x: np.ndarray, mean: np.ndarray, phi: np.ndarray) -> Tuple[floa
     # (rho = 0.01) and pass a group with no knockdown.
     if not (np.isfinite(log_escaper).all() and np.isfinite(log_kd).all()):
         raise ValueError("count_model: non-finite likelihood; check control mean and dispersion")
-
     # P(escaper) of each cell for each rho is expit(logit(pi) + log f_E/f_K).
     log_ratio = log_escaper - log_kd
     # pi stays inside (0, 1) so both components stay in the model.
@@ -299,13 +273,11 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
         mean_cut = kcfg.max_mean_ratio_any
     else:
         mean_cut = kcfg.max_mean_ratio
-
     ntc = klass == CLASS_NTC
     targeting = klass == CLASS_TARGETING
     status = np.full(expr.n_obs, STATUS_UNTOUCHED, dtype=object)
     status[ntc] = STATUS_CONTROL
     ratio = np.full(expr.n_obs, np.nan)
-
     all_targets = sorted(set(targets[targeting]))
     measured = [g for g in all_targets if g in expr.var_names]
     columns = _linear_target_columns(expr, measured) if measured else None
@@ -318,8 +290,7 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
         sample = counts[:10_000].data
         if (sample < 0).any() or (sample != np.round(sample)).any():
             raise ValueError(
-                "knockdown_filter.method=count_model needs raw counts "
-                "(non-negative integers) in layers['counts']"
+                "knockdown_filter.method=count_model needs raw counts (non-negative integers) in layers['counts']"
             )
         raw_columns = _raw_target_columns(expr, measured) if measured else None
         size_factor = _size_factors(expr)
@@ -333,7 +304,6 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
         model_mean = np.full(expr.n_obs, np.nan)
         model_phi = np.full(expr.n_obs, np.nan)
         escaper_prob = np.full(expr.n_obs, np.nan)
-
     rows: List[Dict[str, object]] = []
     for gene in all_targets:
         gene_cells = targeting & (targets == gene)
@@ -342,7 +312,6 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
             x = columns[:, col_of[gene]].toarray().ravel()
             if count_model:
                 x_raw = raw_columns[:, col_of[gene]].toarray().ravel()
-
         # Per-context baseline and ratio; `ok` groups go on to steps 1-3.
         gene_rows: List[Dict[str, object]] = []
         for ctx in context_values:
@@ -387,17 +356,12 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
                         model_mean[cells] = mu * size_factor[cells]
                         model_phi[cells] = phi
             gene_rows.append(row)
-
         if count_model:
 
             def group_test(cells):
                 rho, pi, p_escaper = _fit_mixture(x_raw[cells], model_mean[cells], model_phi[cells])
                 escaper_prob[cells] = p_escaper
-                fields = {
-                    "group_mean_ratio": float(np.mean(ratio[cells])),
-                    "rho": rho,
-                    "escaper_fraction": pi,
-                }
+                fields = {"group_mean_ratio": float(np.mean(ratio[cells])), "rho": rho, "escaper_fraction": pi}
                 # A low rho alone is not enough: a group without knockdown can be fitted
                 # as "most cells knocked down to ~0 plus many escapers". Most cells must
                 # be knockdowns.
@@ -407,7 +371,6 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
             def mark(cells):
                 is_escaper = escaper_prob[cells] >= kcfg.min_escaper_prob
                 status[cells] = np.where(is_escaper, STATUS_ESCAPER, STATUS_KNOCKDOWN)
-
         else:
 
             def group_test(cells):
@@ -422,20 +385,17 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
         else:
             _decide_per_context(gene_rows, status, kcfg, group_test, mark)
         rows.extend(gene_rows)
-
     for row in rows:
         cells = row.pop("_cells")
         if row["group_status"] in (STATUS_NOT_MEASURED, STATUS_LOW_EXPRESSION, STATUS_NON_TESTABLE):
             status[cells] = row["group_status"]
         row["n_kept"] = int(np.isin(status[cells], KEEP_STATUSES).sum())
         row["n_escaper"] = int((status[cells] == STATUS_ESCAPER).sum())
-
     expr.obs[OBS_KD_RATIO] = ratio
     expr.obs[OBS_KD_STATUS] = pd.Categorical(status, categories=list(ALL_STATUSES))
     expr.obs[OBS_KD_KEEP] = np.isin(status, KEEP_STATUSES)
     if count_model:
         expr.obs[OBS_KD_ESCAPER_PROB] = escaper_prob
-
     table = pd.DataFrame(rows)
     if not table.empty:
         table.insert(2, "mode", kcfg.mode)
@@ -454,13 +414,7 @@ def compute_knockdown_mask(expr: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, p
     return expr, table
 
 
-def _decide_per_context(
-    gene_rows: List[Dict[str, object]],
-    status: np.ndarray,
-    kcfg,
-    group_test,
-    mark,
-) -> None:
+def _decide_per_context(gene_rows: List[Dict[str, object]], status: np.ndarray, kcfg, group_test, mark) -> None:
     """``per_context`` and ``any_context``: steps 1-3 on each (target, context).
 
     ``group_test(cells)`` returns whether the group passes step 1 and the fields
@@ -479,7 +433,6 @@ def _decide_per_context(
         row.update(fields)
         row["passed_group"] = bool(passed)
         testable.append(row)
-
     any_passed = any(row["passed_group"] for row in testable)
     for row in testable:
         cells = row["_cells"]
@@ -494,13 +447,7 @@ def _decide_per_context(
             status[cells] = STATUS_FAILED_GROUP
 
 
-def _decide_pooled(
-    gene_rows: List[Dict[str, object]],
-    status: np.ndarray,
-    kcfg,
-    group_test,
-    mark,
-) -> None:
+def _decide_pooled(gene_rows: List[Dict[str, object]], status: np.ndarray, kcfg, group_test, mark) -> None:
     """``pooled``: one group per target over every context with a baseline.
 
     The group test runs on the pooled cells, so contexts are weighted by their
@@ -542,7 +489,6 @@ def attach_perturbation_strength(
     control = results.primary_control
     cols = [f"{c}_{control}" for c in _STRENGTH_COLUMNS if f"{c}_{control}" in results.table]
     strength = results.table.set_index("target_gene")[cols]
-
     table = table.merge(strength, left_on="target_gene", right_index=True, how="left")
     targets = expr.obs[OBS_TARGET].astype(str)
     for col in cols:

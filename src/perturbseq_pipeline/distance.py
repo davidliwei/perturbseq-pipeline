@@ -46,37 +46,16 @@ from scipy import sparse
 from scipy.spatial.distance import cdist, squareform
 from scipy.cluster.hierarchy import fcluster, linkage
 
-from .compute import (
-    derive_seed,
-    log_compute_decision,
-    resolve_stage_backend,
-    run_parallel,
-)
+from .compute import derive_seed, log_compute_decision, resolve_stage_backend, run_parallel
 from .config import Config
-from .data_access import (
-    SharedArrayBuffer,
-    get_embedding,
-    get_target_indices_map,
-)
-from .guides import (
-    CLASS_NTC,
-    CLASS_TARGETING,
-    OBS_CLASS,
-    OBS_TARGET,
-)
-from .perturbation import (
-    CONTROL_NTC,
-    CONTROL_OTHER,
-    benjamini_hochberg,
-    control_masks,
-)
+from .data_access import SharedArrayBuffer, get_embedding, get_target_indices_map
+from .guides import CLASS_NTC, CLASS_TARGETING, OBS_CLASS, OBS_TARGET
+from .perturbation import CONTROL_NTC, CONTROL_OTHER, benjamini_hochberg, control_masks
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Result Data Structures
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -86,20 +65,13 @@ class DistanceResults:
     #: One row per target gene: target_gene, n_cells, n_control, energy_distance,
     #: [mmd_distance], pvalue, fdr, significant.
     table: pd.DataFrame
-
     #: Targets that could not be tested (e.g. below min_cells).
     skipped: pd.DataFrame = field(default_factory=pd.DataFrame)
-
     primary_metric: str = "edistance"
-
     secondary_metric: Optional[str] = None
-
     control_used: str = CONTROL_NTC
-
     n_control_cells: int = 0
-
     representation: str = "X_pca"
-
     note: str = ""
 
     @property
@@ -116,40 +88,25 @@ class DistanceSpaceResults:
 
     #: Pairwise target x target distance matrix (symmetric, 0 diagonal).
     distance_matrix: pd.DataFrame
-
     #: PCoA low-dimensional coordinates: target_gene, PCoA1, PCoA2, ...
     coordinates: pd.DataFrame
-
     #: Nearest phenotypic neighbors: target, neighbor, distance, rank.
     neighbors: pd.DataFrame
-
     #: Phenotype module assignments: target_gene, phenotype_module.
     phenotype_modules: pd.DataFrame
-
     #: Targets excluded from DistanceSpace (e.g. below min_cells).
     skipped: pd.DataFrame = field(default_factory=pd.DataFrame)
-
     eigenvalues: np.ndarray = field(default_factory=lambda: np.zeros(0))
-
     n_components: int = 0
-
     metric: str = "edistance"
-
     linkage_method: str = "average"
-
     note: str = ""
 
 
-# ---------------------------------------------------------------------------
 # Mathematical Distance Functions
-# ---------------------------------------------------------------------------
 
 
-def energy_distance_from_cdist(
-    D: np.ndarray,
-    idx_x: np.ndarray,
-    idx_y: np.ndarray,
-) -> float:
+def energy_distance_from_cdist(D: np.ndarray, idx_x: np.ndarray, idx_y: np.ndarray) -> float:
     """Compute Energy Distance statistic directly from a precomputed pairwise distance matrix.
 
     Given pooled sample Z = [X; Y] and its pairwise Euclidean distance matrix D,
@@ -171,18 +128,14 @@ def energy_distance_from_cdist(
     m = len(idx_y)
     if n == 0 or m == 0:
         return float("nan")
-
     sub_x = D[np.ix_(idx_x, idx_x)]
     sub_y = D[np.ix_(idx_y, idx_y)]
-
     s_x = float(np.sum(sub_x))
     s_y = float(np.sum(sub_y))
     s_total = float(np.sum(D))
-
     between_term = (s_total - s_x - s_y) / (n * m)
     within_x = s_x / (n * n)
     within_y = s_y / (m * m)
-
     edist_sq = between_term - within_x - within_y
     # Energy distance is mathematically non-negative; clip numerical artifacts near zero
     return float(max(edist_sq, 0.0))
@@ -208,25 +161,18 @@ def compute_energy_distance(X: np.ndarray, Y: np.ndarray) -> float:
     n, m = X.shape[0], Y.shape[0]
     if n == 0 or m == 0:
         return float("nan")
-
     # Fast cdist computation
     d_xy = cdist(X, Y, metric="euclidean")
     d_xx = cdist(X, X, metric="euclidean")
     d_yy = cdist(Y, Y, metric="euclidean")
-
     mean_xy = float(np.mean(d_xy))
     mean_xx = float(np.mean(d_xx))
     mean_yy = float(np.mean(d_yy))
-
     edist = 2.0 * mean_xy - mean_xx - mean_yy
     return float(max(edist, 0.0))
 
 
-def compute_mmd(
-    X: np.ndarray,
-    Y: np.ndarray,
-    gamma: Optional[float] = None,
-) -> float:
+def compute_mmd(X: np.ndarray, Y: np.ndarray, gamma: Optional[float] = None) -> float:
     """Compute empirical Maximum Mean Discrepancy (MMD) with Gaussian RBF kernel.
 
     Parameters
@@ -249,29 +195,23 @@ def compute_mmd(
     n, m = X.shape[0], Y.shape[0]
     if n == 0 or m == 0:
         return float("nan")
-
     d2_xx = cdist(X, X, metric="sqeuclidean")
     d2_yy = cdist(Y, Y, metric="sqeuclidean")
     d2_xy = cdist(X, Y, metric="sqeuclidean")
-
     if gamma is None:
         # Median heuristic across combined samples
         combined_d2 = np.concatenate([d2_xx.ravel(), d2_yy.ravel(), d2_xy.ravel()])
         pos_d2 = combined_d2[combined_d2 > 0]
         med = float(np.median(pos_d2)) if pos_d2.size > 0 else 1.0
         gamma = 1.0 / max(med, 1e-6)
-
     k_xx = np.exp(-gamma * d2_xx)
     k_yy = np.exp(-gamma * d2_yy)
     k_xy = np.exp(-gamma * d2_xy)
-
     mmd2 = float(np.mean(k_xx) + np.mean(k_yy) - 2.0 * np.mean(k_xy))
     return float(max(mmd2, 0.0))
 
 
-# ---------------------------------------------------------------------------
 # Sampling & Representation Helpers
-# ---------------------------------------------------------------------------
 
 
 def _resolve_representation(expr: ad.AnnData, requested_rep: str) -> np.ndarray:
@@ -280,17 +220,13 @@ def _resolve_representation(expr: ad.AnnData, requested_rep: str) -> np.ndarray:
 
 
 def _sample_cell_indices(
-    indices: np.ndarray,
-    max_cells: int,
-    rng: np.random.Generator,
-    strata: Optional[np.ndarray] = None,
+    indices: np.ndarray, max_cells: int, rng: np.random.Generator, strata: Optional[np.ndarray] = None
 ) -> np.ndarray:
     """Deterministically sample at most max_cells indices, preserving batch strata if available."""
     indices = np.asarray(indices, dtype=np.int64)
     n = len(indices)
     if n <= max_cells:
         return indices
-
     if strata is not None:
         # Stratified sampling across batches/lanes
         strata_values = strata[indices]
@@ -302,13 +238,8 @@ def _sample_cell_indices(
             s_quota = max(1, int(np.round(max_cells * (s_count / n))))
             s_quota = min(s_quota, len(s_idx))
             if s_quota > 0:
-                s_sampled = (
-                    s_idx
-                    if s_quota == len(s_idx)
-                    else rng.choice(s_idx, size=s_quota, replace=False)
-                )
+                s_sampled = s_idx if s_quota == len(s_idx) else rng.choice(s_idx, size=s_quota, replace=False)
                 selected_list.append(s_sampled)
-
         if selected_list:
             combined = np.concatenate(selected_list)
             if len(combined) > max_cells:
@@ -322,23 +253,17 @@ def _sample_cell_indices(
                     combined = np.concatenate([combined, topup])
             combined.sort()
             return combined.astype(np.int64)
-
     # Uniform random sampling fallback
     selected = rng.choice(indices, size=max_cells, replace=False)
     selected.sort()
     return selected.astype(np.int64)
 
 
-# ---------------------------------------------------------------------------
 # Permutation DistanceTest (Optimized Exact O(n^2) Null Sampling)
-# ---------------------------------------------------------------------------
 
 
 def distance_test_permutation(
-    X: np.ndarray,
-    Y: np.ndarray,
-    n_permutations: int = 1000,
-    seed: int = 123,
+    X: np.ndarray, Y: np.ndarray, n_permutations: int = 1000, seed: int = 123
 ) -> Tuple[float, float]:
     """Perform an exact, fast permutation test for Energy Distance between X and Y.
 
@@ -373,14 +298,12 @@ def distance_test_permutation(
     m = Y.shape[0]
     if n == 0 or m == 0:
         return float("nan"), float("nan")
-
     # Combine samples and compute full N x N pairwise distance matrix once
     Z = np.vstack([X, Y])
     N = n + m
     D = cdist(Z, Z, metric="euclidean")
     row_sums = np.sum(D, axis=1)
     s_total = float(np.sum(row_sums))
-
     # Observed distance
     idx_x_obs = np.arange(n, dtype=np.int64)
     r_x_obs = float(np.sum(row_sums[idx_x_obs]))
@@ -390,21 +313,16 @@ def distance_test_permutation(
     within_x_obs = s_x_obs / (n * n)
     within_y_obs = s_y_obs / (m * m)
     obs_stat = float(max(between_obs - within_x_obs - within_y_obs, 0.0))
-
     if n_permutations <= 0:
         return obs_stat, float("nan")
-
     rng = np.random.default_rng(seed)
     all_indices = np.arange(N, dtype=np.int64)
     count_greater_or_equal = 0
     tol = obs_stat - 1e-12
-
     inv_nm = 2.0 / (n * m)
     inv_nn = 1.0 / (n * n)
     inv_mm = 1.0 / (m * m)
-
-    use_x = (n <= m)
-
+    use_x = n <= m
     for _ in range(n_permutations):
         perm = rng.permutation(all_indices)
         if use_x:
@@ -421,34 +339,19 @@ def distance_test_permutation(
             s_y = s_k
             s_x = s_total + s_y - 2.0 * r_k
             stat = (r_k - s_y) * inv_nm - s_x * inv_nn - s_y * inv_mm
-
         if stat >= tol:
             count_greater_or_equal += 1
-
     # Exact finite-permutation empirical p-value
     pval = (1.0 + count_greater_or_equal) / (1.0 + n_permutations)
     return obs_stat, float(pval)
 
 
-# ---------------------------------------------------------------------------
 # Perturbation Distance vs Control API
-# ---------------------------------------------------------------------------
 
 
 def _eval_target_dist_worker(
     task_payload: Tuple[
-        int,
-        str,
-        np.ndarray,
-        np.ndarray,
-        np.ndarray,
-        Optional[np.ndarray],
-        int,
-        int,
-        int,
-        int,
-        str,
-        Optional[str],
+        int, str, np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], int, int, int, int, str, Optional[str]
     ],
 ) -> Tuple[Optional[dict], Optional[dict]]:
     """Worker function executing DistanceTest for one perturbation target.
@@ -470,54 +373,24 @@ def _eval_target_dist_worker(
         primary_metric,
         secondary_metric,
     ) = task_payload
-
     n_pert = int(pert_indices.size)
     if n_pert < min_cells:
-        return None, {
-            "target_gene": target,
-            "n_cells": n_pert,
-            "reason": f"fewer than {min_cells} cells ({n_pert})",
-        }
-
+        return None, {"target_gene": target, "n_cells": n_pert, "reason": f"fewer than {min_cells} cells ({n_pert})"}
     target_seed = derive_seed(random_seed, f"{i}_{target}")
     rng_target = np.random.default_rng(target_seed)
-
-    pert_indices_sampled = _sample_cell_indices(
-        pert_indices,
-        max_cells_per_target,
-        rng_target,
-        strata=strata,
-    )
+    pert_indices_sampled = _sample_cell_indices(pert_indices, max_cells_per_target, rng_target, strata=strata)
     X_target = embedding_arr[pert_indices_sampled]
-
     # Compute primary metric and permutation DistanceTest
-    edist, pval = distance_test_permutation(
-        X_target,
-        Y_ctrl,
-        n_permutations=n_permutations,
-        seed=target_seed,
-    )
-
-    row = {
-        "target_gene": target,
-        "n_cells": n_pert,
-        "n_control": len(Y_ctrl),
-        "energy_distance": edist,
-        "pvalue": pval,
-    }
-
+    edist, pval = distance_test_permutation(X_target, Y_ctrl, n_permutations=n_permutations, seed=target_seed)
+    row = {"target_gene": target, "n_cells": n_pert, "n_control": len(Y_ctrl), "energy_distance": edist, "pvalue": pval}
     # Optional secondary metric: MMD
     if secondary_metric == "mmd":
         mmd_val = compute_mmd(X_target, Y_ctrl)
         row["mmd_distance"] = mmd_val
-
     return row, None
 
 
-def compute_perturbation_distance(
-    expr: ad.AnnData,
-    cfg: Config,
-) -> Optional[DistanceResults]:
+def compute_perturbation_distance(expr: ad.AnnData, cfg: Config) -> Optional[DistanceResults]:
     """Compute Perturbation Distance vs control and permutation DistanceTest for all targets.
 
     Parameters
@@ -536,21 +409,16 @@ def compute_perturbation_distance(
     if not dcfg.enabled:
         logger.info("Perturbation Distance disabled (distance.enabled: false)")
         return None
-
     logger.info("=== Computing Perturbation Distance vs Control (DistanceTest) ===")
-
     rep_name = dcfg.representation
     embedding = _resolve_representation(expr, rep_name)
     logger.info("Using representation %r (%d dimensions)", rep_name, embedding.shape[1])
-
     # Extract target and control assignments
     obs = expr.obs
     targets_col = obs[OBS_TARGET].astype(str).to_numpy()
     klass = obs[OBS_CLASS].astype(str).to_numpy()
-
     base_masks = control_masks(expr, cfg)
     controls_available = {k: int(v.sum()) for k, v in base_masks.items()}
-
     # Select control population
     primary_ctrl = cfg.perturbation.primary_control
     if primary_ctrl in base_masks and controls_available.get(primary_ctrl, 0) >= dcfg.min_cells:
@@ -568,50 +436,37 @@ def compute_perturbation_distance(
     else:
         logger.warning("No control cells found for perturbation distance analysis.")
         return DistanceResults(
-            table=pd.DataFrame(columns=["target_gene", "n_cells", "n_control", "energy_distance", "pvalue", "fdr", "significant"]),
+            table=pd.DataFrame(
+                columns=["target_gene", "n_cells", "n_control", "energy_distance", "pvalue", "fdr", "significant"]
+            ),
             skipped=pd.DataFrame(),
             primary_metric=dcfg.primary_metric,
             secondary_metric=dcfg.secondary_metric,
             representation=rep_name,
             note="No control cells available.",
         )
-
     ctrl_mask = base_masks[ctrl_choice]
     n_ctrl_total = int(ctrl_mask.sum())
     ctrl_indices_all = np.flatnonzero(ctrl_mask)
-
     logger.info(
-        "Control group: %r (%d cells available, sampling up to %d)",
-        ctrl_choice,
-        n_ctrl_total,
-        dcfg.max_control_cells,
+        "Control group: %r (%d cells available, sampling up to %d)", ctrl_choice, n_ctrl_total, dcfg.max_control_cells
     )
-
     # Batch/lane strata for sampling
     strata = None
     if dcfg.stratify_by and dcfg.stratify_by in obs.columns:
         strata = obs[dcfg.stratify_by].astype(str).to_numpy()
     elif "lane_id" in obs.columns:
         strata = obs["lane_id"].astype(str).to_numpy()
-
     # Pre-sample control cells reproducibly
     rng_ctrl = np.random.default_rng(dcfg.random_seed)
-    ctrl_indices_sampled = _sample_cell_indices(
-        ctrl_indices_all,
-        dcfg.max_control_cells,
-        rng_ctrl,
-        strata=strata,
-    )
+    ctrl_indices_sampled = _sample_cell_indices(ctrl_indices_all, dcfg.max_control_cells, rng_ctrl, strata=strata)
     Y_ctrl = embedding[ctrl_indices_sampled]
-
     # Identify all targeting perturbations
     targeting_mask = klass == CLASS_TARGETING
     all_targets = sorted(set(targets_col[targeting_mask]))
-
     decision = resolve_stage_backend("distance", cfg, n_cells=expr.n_obs)
     if cfg.compute.log_backend_decisions:
         log_compute_decision(decision)
-
     logger.info(
         "[distance] representation=%s representation_shape=%dx%d worker_data=shared anndata_passed_to_workers=false n_jobs=%d n_permutations=%d",
         rep_name,
@@ -620,12 +475,9 @@ def compute_perturbation_distance(
         decision.n_jobs,
         dcfg.n_permutations,
     )
-
     targeting_indices_dict: Dict[str, np.ndarray] = {
-        target: np.flatnonzero((targets_col == target) & targeting_mask)
-        for target in all_targets
+        target: np.flatnonzero((targets_col == target) & targeting_mask) for target in all_targets
     }
-
     # Setup shared array buffer for worker processes
     shm_buffer: Optional[SharedArrayBuffer] = None
     worker_embedding: np.ndarray = embedding
@@ -636,7 +488,6 @@ def compute_perturbation_distance(
         except Exception as exc:
             logger.debug("SharedArrayBuffer creation skipped: %s", exc)
             worker_embedding = embedding
-
     tasks = [
         (
             i,
@@ -654,7 +505,6 @@ def compute_perturbation_distance(
         )
         for i, target in enumerate(all_targets)
     ]
-
     try:
         results = run_parallel(
             _eval_target_dist_worker,
@@ -666,22 +516,12 @@ def compute_perturbation_distance(
     finally:
         if shm_buffer is not None:
             shm_buffer.close()
-
     rows = [r for r, s in results if r is not None]
     skipped = [s for r, s in results if s is not None]
-
     if not rows:
         logger.warning("No targets had sufficient cells for perturbation distance analysis.")
         table = pd.DataFrame(
-            columns=[
-                "target_gene",
-                "n_cells",
-                "n_control",
-                "energy_distance",
-                "pvalue",
-                "fdr",
-                "significant",
-            ]
+            columns=["target_gene", "n_cells", "n_control", "energy_distance", "pvalue", "fdr", "significant"]
         )
         return DistanceResults(
             table=table,
@@ -693,16 +533,12 @@ def compute_perturbation_distance(
             representation=rep_name,
             note="No targets met min_cells threshold.",
         )
-
     table = pd.DataFrame(rows)
-
     # Benjamini-Hochberg FDR correction
     table["fdr"] = benjamini_hochberg(table["pvalue"].to_numpy())
     table["significant"] = table["fdr"] < dcfg.fdr_threshold
-
     # Sort descending by energy distance
     table = table.sort_values("energy_distance", ascending=False).reset_index(drop=True)
-
     skipped_df = pd.DataFrame(skipped)
     n_sig = int(table["significant"].sum())
     logger.info(
@@ -712,7 +548,6 @@ def compute_perturbation_distance(
         dcfg.fdr_threshold,
         len(skipped_df),
     )
-
     return DistanceResults(
         table=table,
         skipped=skipped_df,
@@ -724,15 +559,10 @@ def compute_perturbation_distance(
     )
 
 
-# ---------------------------------------------------------------------------
 # Perturbation Distance Space API
-# ---------------------------------------------------------------------------
 
 
-def compute_pcoa_coordinates(
-    dist_matrix: np.ndarray,
-    n_components: int = 10,
-) -> Tuple[np.ndarray, np.ndarray]:
+def compute_pcoa_coordinates(dist_matrix: np.ndarray, n_components: int = 10) -> Tuple[np.ndarray, np.ndarray]:
     """Compute classical Multidimensional Scaling (PCoA) from a distance matrix.
 
     Handles non-Euclidean eigenspectra transparently by retaining only positive
@@ -754,41 +584,32 @@ def compute_pcoa_coordinates(
     K = D.shape[0]
     if K < 2:
         return np.zeros((K, 0), dtype=np.float64), np.zeros(0, dtype=np.float64)
-
     # Double-centering: B = -0.5 * H * (D^2) * H
     D_sq = D**2
     row_means = np.mean(D_sq, axis=1, keepdims=True)
     col_means = np.mean(D_sq, axis=0, keepdims=True)
     grand_mean = np.mean(D_sq)
     B = -0.5 * (D_sq - row_means - col_means + grand_mean)
-
     # Eigendecomposition of symmetric matrix
     evals, evecs = np.linalg.eigh(B)
-
     # Sort descending
     order = np.argsort(evals)[::-1]
     evals = evals[order]
     evecs = evecs[:, order]
-
     # Retain strictly positive eigenvalues (filtering out non-Euclidean artifacts)
     pos_mask = evals > 1e-10
     n_pos = int(pos_mask.sum())
-
     if n_pos == 0:
         logger.warning("PCoA: no positive eigenvalues found in distance matrix.")
         return np.zeros((K, 0), dtype=np.float64), np.zeros(0, dtype=np.float64)
-
     p = min(n_components, n_pos)
     pos_evals = evals[:p]
     pos_evecs = evecs[:, :p]
-
     coords = pos_evecs * np.sqrt(pos_evals)
     return coords, pos_evals
 
 
-def _eval_pair_dist_worker(
-    task: Tuple[int, int, np.ndarray, np.ndarray, str],
-) -> Tuple[int, int, float]:
+def _eval_pair_dist_worker(task: Tuple[int, int, np.ndarray, np.ndarray, str]) -> Tuple[int, int, float]:
     """Evaluate pairwise distance between two perturbation samples."""
     i, j, X_i, X_j, metric = task
     if metric == "mmd":
@@ -798,10 +619,7 @@ def _eval_pair_dist_worker(
     return i, j, d_val
 
 
-def compute_distance_space(
-    expr: ad.AnnData,
-    cfg: Config,
-) -> Optional[DistanceSpaceResults]:
+def compute_distance_space(expr: ad.AnnData, cfg: Config) -> Optional[DistanceSpaceResults]:
     """Compute pairwise Perturbation Distance Space, PCoA embedding, and Phenotype Modules.
 
     Parameters
@@ -820,62 +638,39 @@ def compute_distance_space(
     if not dscfg.enabled:
         logger.info("Perturbation Distance Space disabled (distance_space.enabled: false)")
         return None
-
     logger.info("=== Computing Perturbation Distance Space (Pairwise Manifold) ===")
-
     rep_name = dscfg.representation
     embedding = _resolve_representation(expr, rep_name)
-
     obs = expr.obs
     targets_col = obs[OBS_TARGET].astype(str).to_numpy()
     klass = obs[OBS_CLASS].astype(str).to_numpy()
     targeting_mask = klass == CLASS_TARGETING
-
     all_targets = sorted(set(targets_col[targeting_mask]))
-
     # Strata for sampling
     strata = None
     if "lane_id" in obs.columns:
         strata = obs["lane_id"].astype(str).to_numpy()
-
     # Filter eligible targets
     eligible_targets: List[str] = []
     target_samples: Dict[str, np.ndarray] = {}
     skipped: List[dict] = []
-
     for i, target in enumerate(all_targets):
         pert_mask = (targets_col == target) & targeting_mask
         n_pert = int(pert_mask.sum())
         if n_pert < dscfg.min_cells:
             skipped.append(
-                {
-                    "target_gene": target,
-                    "n_cells": n_pert,
-                    "reason": f"fewer than {dscfg.min_cells} cells ({n_pert})",
-                }
+                {"target_gene": target, "n_cells": n_pert, "reason": f"fewer than {dscfg.min_cells} cells ({n_pert})"}
             )
             continue
-
         pert_indices = np.flatnonzero(pert_mask)
         target_seed = (dscfg.random_seed + i * 43) % (2**31 - 1)
         rng = np.random.default_rng(target_seed)
-
-        sampled_idx = _sample_cell_indices(
-            pert_indices,
-            dscfg.max_cells_per_target,
-            rng,
-            strata=strata,
-        )
+        sampled_idx = _sample_cell_indices(pert_indices, dscfg.max_cells_per_target, rng, strata=strata)
         eligible_targets.append(target)
         target_samples[target] = embedding[sampled_idx]
-
     K = len(eligible_targets)
     if K < 2:
-        logger.warning(
-            "Fewer than 2 targets met min_cells=%d for DistanceSpace (found %d).",
-            dscfg.min_cells,
-            K,
-        )
+        logger.warning("Fewer than 2 targets met min_cells=%d for DistanceSpace (found %d).", dscfg.min_cells, K)
         empty_df = pd.DataFrame()
         return DistanceSpaceResults(
             distance_matrix=empty_df,
@@ -885,35 +680,16 @@ def compute_distance_space(
             skipped=pd.DataFrame(skipped),
             note="Fewer than 2 eligible targets.",
         )
-
-    decision = resolve_stage_backend(
-        "distance_space",
-        cfg,
-        n_cells=expr.n_obs,
-        extra_info={"n_dense_elements": K * K},
-    )
+    decision = resolve_stage_backend("distance_space", cfg, n_cells=expr.n_obs, extra_info={"n_dense_elements": K * K})
     if cfg.compute.log_backend_decisions:
         log_compute_decision(decision)
-
-    logger.info(
-        "Computing pairwise %s matrix for %d perturbations...",
-        dscfg.metric,
-        K,
-    )
-
+    logger.info("Computing pairwise %s matrix for %d perturbations...", dscfg.metric, K)
     dist_mat = np.zeros((K, K), dtype=np.float64)
     pair_tasks = [
-        (
-            i,
-            j,
-            target_samples[eligible_targets[i]],
-            target_samples[eligible_targets[j]],
-            dscfg.metric,
-        )
+        (i, j, target_samples[eligible_targets[i]], target_samples[eligible_targets[j]], dscfg.metric)
         for i in range(K)
         for j in range(i + 1, K)
     ]
-
     pair_results = run_parallel(
         _eval_pair_dist_worker,
         pair_tasks,
@@ -921,24 +697,17 @@ def compute_distance_space(
         blas_threads=cfg.compute.blas_threads_per_worker,
         backend=cfg.compute.cpu_parallel_backend,
     )
-
     for i, j, d_val in pair_results:
         dist_mat[i, j] = d_val
         dist_mat[j, i] = d_val
-
     dist_df = pd.DataFrame(dist_mat, index=eligible_targets, columns=eligible_targets)
-
     # 1. PCoA Coordinates
-    coords_arr, evals = compute_pcoa_coordinates(
-        dist_mat,
-        n_components=dscfg.n_components,
-    )
+    coords_arr, evals = compute_pcoa_coordinates(dist_mat, n_components=dscfg.n_components)
     p = coords_arr.shape[1]
     coord_cols = [f"PCoA{col + 1}" for col in range(p)]
     coords_df = pd.DataFrame(coords_arr, index=eligible_targets, columns=coord_cols)
     coords_df.insert(0, "target_gene", eligible_targets)
     coords_df = coords_df.reset_index(drop=True)
-
     # 2. Nearest Phenotypic Neighbors
     k_nn = min(dscfg.nearest_neighbors, K - 1)
     neighbor_rows: List[dict] = []
@@ -957,15 +726,12 @@ def compute_distance_space(
                     "rank": rank,
                 }
             )
-
     neighbors_df = pd.DataFrame(neighbor_rows)
-
     # 3. Phenotype Modules (Hierarchical Clustering in Phenotype Distance Space)
     pheno_modules_df = pd.DataFrame(columns=["target_gene", "phenotype_module"])
     if dscfg.clustering and K >= 2:
         condensed_dist = squareform(dist_mat, checks=False)
         link = linkage(condensed_dist, method=dscfg.linkage_method)
-
         if dscfg.n_modules is not None:
             t_clust = min(dscfg.n_modules, K)
             clusters = fcluster(link, t=t_clust, criterion="maxclust")
@@ -975,15 +741,8 @@ def compute_distance_space(
             # Default reasonable module count
             t_clust = max(2, min(9, K // 4 if K >= 8 else K))
             clusters = fcluster(link, t=t_clust, criterion="maxclust")
-
         module_labels = [f"PM{c}" for c in clusters]
-        pheno_modules_df = pd.DataFrame(
-            {
-                "target_gene": eligible_targets,
-                "phenotype_module": module_labels,
-            }
-        )
-
+        pheno_modules_df = pd.DataFrame({"target_gene": eligible_targets, "phenotype_module": module_labels})
     logger.info(
         "Distance Space complete: %d x %d matrix, %d PCoA coordinates, %d neighbors per target, %d phenotype modules",
         K,
@@ -992,7 +751,6 @@ def compute_distance_space(
         k_nn,
         pheno_modules_df["phenotype_module"].nunique() if not pheno_modules_df.empty else 0,
     )
-
     return DistanceSpaceResults(
         distance_matrix=dist_df,
         coordinates=coords_df,

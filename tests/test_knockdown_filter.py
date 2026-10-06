@@ -51,7 +51,6 @@ def adata():
     # One control cell in A expresses G3: 1/40 = 2.5% detection, below 10%.
     t, k, c, e = rows[0]
     rows[0] = (t, k, c, {**e, "G3": 4.0})
-
     rows += _block("G1", "targeting", "A", 50, G1=1)
     rows += _block("G1", "targeting", "A", 10, G1=10)
     rows += _block("G1", "targeting", "B", 30, G1=10)
@@ -60,7 +59,6 @@ def adata():
     rows += _block("G4", "targeting", "A", 35)
     rows += _block("G5", "targeting", "B", 40, G5=2)
     rows += _block("ambiguous", "ambiguous", "A", 10, G1=10)
-
     values = np.array([[e[g] for g in GENES] for _, _, _, e in rows])
     obs = pd.DataFrame(
         {
@@ -97,7 +95,6 @@ def test_per_context_filters_each_context_independently(adata):
     assert _statuses(a, "G3") == {"low_control_expression": 40}
     assert _statuses(a, "G4") == {"not_measured": 35}
     assert _statuses(a, "G5") == {"failed_group": 40}
-
     row = table.set_index(["target_gene", "context"]).loc[("G1", "A")]
     assert row["mean_ratio"] == pytest.approx((50 * 0.1 + 10 * 1.0) / 60)
     assert row["n_kept"] == 50 and row["n_escaper"] == 10
@@ -172,22 +169,17 @@ def test_missing_context_column_fails_early(adata):
 
 def test_context_modes_require_a_context_key():
     for mode in ("per_context", "any_context"):
-        cfg = Config.from_dict(
-            {"input": {"h5ad": "x.h5ad"}, "knockdown_filter": {"enabled": True, "mode": mode}}
-        )
+        cfg = Config.from_dict({"input": {"h5ad": "x.h5ad"}, "knockdown_filter": {"enabled": True, "mode": mode}})
         with pytest.raises(ValueError, match="context_key"):
             cfg.validate()
 
 
-# ---------------------------------------------------------------------------
 # End-to-end on the synthetic lanes (condition: control / treated)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("method", ["mean_ratio", "count_model"])
 def test_pipeline_writes_the_mask_without_removing_cells(tmp_path, method):
     import scanpy as sc
-
     from make_synthetic import KD_TARGETS, NULL_TARGETS, make_dataset
     from perturbseq_pipeline.cli import run_pipeline
     from test_pipeline import _base_config
@@ -196,12 +188,10 @@ def test_pipeline_writes_the_mask_without_removing_cells(tmp_path, method):
     base = run_pipeline(_base_config(synthetic, tmp_path / "base"))
     kd = {"enabled": True, "mode": "per_context", "context_key": "condition", "min_cells": 5, "method": method}
     res = run_pipeline(_base_config(synthetic, tmp_path / "kd", knockdown_filter=kd))
-
     assert res.n_cells == base.n_cells
     obs = sc.read_h5ad(res.h5ad).obs
     for col in (OBS_KD_RATIO, OBS_KD_STATUS, OBS_KD_KEEP, "pert_log2fc_ntc", "pert_is_hit_ntc"):
         assert col in obs.columns
-
     table = pd.read_csv(res.tables["knockdown_filter"])
     assert set(table["context"]) == {"control", "treated"}
     by_target = table.groupby("target_gene")["group_status"].agg(set)
@@ -212,9 +202,7 @@ def test_pipeline_writes_the_mask_without_removing_cells(tmp_path, method):
     assert table["log2fc_ntc"].notna().all()
 
 
-# ---------------------------------------------------------------------------
 # method: count_model, on simulated negative-binomial counts with known truth
-# ---------------------------------------------------------------------------
 
 
 def _nb(rng, mean, phi):
@@ -248,14 +236,11 @@ def counts_adata():
         if t == "MOSTESC":
             escaper[rows[: int(0.7 * n_target)]] = True
             level[rows[int(0.7 * n_target) :], j] = 0.2
-    targets = np.column_stack(
-        [_nb(rng, base[t] * depth * level[:, j], 0.1) for j, t in enumerate(base)]
-    )
+    targets = np.column_stack([_nb(rng, base[t] * depth * level[:, j], 0.1) for j, t in enumerate(base)])
     filler = rng.poisson(40.0 * depth[:, None], (n, n_filler))
     counts = np.hstack([targets, filler]).astype(np.float64)
     library = counts.sum(axis=1, keepdims=True)
     lognorm = np.log1p(counts / library * np.median(library))
-
     obs = pd.DataFrame(
         {
             "target_gene": labels,
@@ -277,7 +262,6 @@ def test_count_model_recovers_knockdown_and_escapers(counts_adata):
     assert row["group_status"] == "pass"
     assert 0.12 < row["rho"] < 0.3
     assert 0.12 < row["escaper_fraction"] < 0.3
-
     # Escaper counts (mean 8) and knocked-down counts (mean 1.6) overlap, so many
     # escapers get a middling posterior and stay unmarked at 0.9. What the model
     # promises is that the posterior is honest: cells called are escapers, and
@@ -320,9 +304,7 @@ def test_count_model_rejects_normalized_counts(counts_adata):
 
 
 def test_unknown_method_is_rejected():
-    cfg = Config.from_dict(
-        {"input": {"h5ad": "x.h5ad"}, "knockdown_filter": {"enabled": True, "method": "median"}}
-    )
+    cfg = Config.from_dict({"input": {"h5ad": "x.h5ad"}, "knockdown_filter": {"enabled": True, "method": "median"}})
     with pytest.raises(ValueError, match="method"):
         cfg.validate()
 
@@ -340,7 +322,6 @@ def test_sharing_dispersion_across_genes_beats_gene_wise_with_few_controls():
     s = rng.lognormal(0.0, 0.2, n_cells)
     s = s / np.median(s)
     counts = np.column_stack([_nb(rng, mean[g] * s, true_phi[g]) for g in range(n_genes)])
-
     mu, phi_shared = _control_fit(sp.csr_matrix(counts.astype(np.float64)), s)
     m = mu[None, :] * s[:, None]
     phi_gene = (((counts - m) ** 2).sum(0) - m.sum(0)) / (m**2).sum(0)
@@ -375,6 +356,5 @@ def test_count_model_fails_a_group_that_is_mostly_escapers(counts_adata):
     row = table.set_index("target_gene").loc["MOSTESC"]
     assert row["rho"] < 0.3 and row["escaper_fraction"] > 0.5
     assert row["group_status"] == "failed_group"
-
     _, table = _run(counts_adata.copy(), method="count_model", max_escaper_fraction=1.0)
     assert table.set_index("target_gene").loc["MOSTESC", "group_status"] == "pass"

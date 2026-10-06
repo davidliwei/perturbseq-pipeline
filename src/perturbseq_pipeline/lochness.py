@@ -60,19 +60,14 @@ import pandas as pd
 from scipy import sparse
 
 from .cluster import CLUSTER_KEY
-from .compute import (
-    log_compute_decision,
-    resolve_stage_backend,
-)
+from .compute import log_compute_decision, resolve_stage_backend
 from .config import Config
 from .guides import CLASS_NTC, CLASS_TARGETING, OBS_CLASS
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Optional Numba backend
-# ---------------------------------------------------------------------------
 
 try:
     import numba
@@ -85,9 +80,7 @@ except ImportError:
     NUMBA_AVAILABLE = False
 
 
-# ---------------------------------------------------------------------------
 # Public keys
-# ---------------------------------------------------------------------------
 
 #: Prefix of the per-cell full-score columns written into ``obs``.
 LOCHNESS_PREFIX = "lochness_"
@@ -99,7 +92,6 @@ LOCHNESS_SELF = "lochness_self"
 NEIGHBORS_KEY = "lochness_nn"
 
 
-# ---------------------------------------------------------------------------
 # Scalability safeguards
 @dataclass
 class LochnessResults:
@@ -107,26 +99,19 @@ class LochnessResults:
 
     #: One row per target gene.
     summary: pd.DataFrame
-
     #: ``{target: per-cell score array}`` aligned to ``expr.obs_names``.
     #: Populated only in standard full-score mode.
     scores: Dict[str, np.ndarray] = field(default_factory=dict)
-
     #: Each cell's score for its own perturbation.
     self_score: Optional[np.ndarray] = None
-
     #: Mean score per (target, cluster), for heatmaps.
     by_cluster: pd.DataFrame = field(default_factory=pd.DataFrame)
-
     #: Actual median neighbour count.
     n_neighbors: int = 0
-
     #: Targets excluded because they had too few cells.
     skipped: pd.DataFrame = field(default_factory=pd.DataFrame)
-
     #: Human-readable note describing execution mode.
     note: str = ""
-
     #: True when only ``lochness_self`` was materialised.
     self_only: bool = False
 
@@ -143,234 +128,101 @@ class LochnessResults:
         return list(self.summary.head(n)["target_gene"])
 
 
-# ---------------------------------------------------------------------------
 # Numba kernel
-# ---------------------------------------------------------------------------
 
 if NUMBA_AVAILABLE:
 
-    @njit(
-        parallel=True,
-        cache=True,
-        nogil=True,
-    )
-    def _count_same_label_neighbors_numba(
-        indptr: np.ndarray,
-        indices: np.ndarray,
-        codes: np.ndarray,
-    ) -> np.ndarray:
+    @njit(parallel=True, cache=True, nogil=True)
+    def _count_same_label_neighbors_numba(indptr: np.ndarray, indices: np.ndarray, codes: np.ndarray) -> np.ndarray:
         """Count same-perturbation neighbours for every CSR row.
 
         Each focal cell is independent, so rows can be distributed safely
         across Numba threads with ``prange``.
         """
-
         n_cells = indptr.shape[0] - 1
-
-        counts = np.zeros(
-            n_cells,
-            dtype=np.float32,
-        )
-
+        counts = np.zeros(n_cells, dtype=np.float32)
         for i in prange(n_cells):
-
             start = indptr[i]
             end = indptr[i + 1]
-
             focal_code = codes[i]
-
             same = 0
-
             for j in range(start, end):
-
                 neighbour = indices[j]
-
                 if codes[neighbour] == focal_code:
                     same += 1
-
             counts[i] = same
-
         return counts
 
 
-def _count_same_label_neighbors_python(
-    indptr: np.ndarray,
-    indices: np.ndarray,
-    codes: np.ndarray,
-) -> np.ndarray:
+def _count_same_label_neighbors_python(indptr: np.ndarray, indices: np.ndarray, codes: np.ndarray) -> np.ndarray:
     """Pure-Python fallback for same-label neighbour counting."""
-
     n_cells = indptr.shape[0] - 1
-
-    counts = np.zeros(
-        n_cells,
-        dtype=np.float32,
-    )
-
+    counts = np.zeros(n_cells, dtype=np.float32)
     for i in range(n_cells):
-
         start = indptr[i]
         end = indptr[i + 1]
-
         neighbours = indices[start:end]
-
         if neighbours.size:
-
-            counts[i] = np.count_nonzero(
-                codes[neighbours] == codes[i]
-            )
-
+            counts[i] = np.count_nonzero(codes[neighbours] == codes[i])
     return counts
 
 
-# ---------------------------------------------------------------------------
 # Neighbour graph
-# ---------------------------------------------------------------------------
 
 
-def _build_neighbor_graph(
-    expr: ad.AnnData,
-    cfg: Config,
-) -> sparse.csr_matrix:
+def _build_neighbor_graph(expr: ad.AnnData, cfg: Config) -> sparse.csr_matrix:
     """Build or reuse the large-k neighbour graph required by lochNESS.
 
     The standard clustering graph is often too small for perturbation
     composition analysis. pertTF uses k ~= 300, and this implementation keeps
     the dedicated lochNESS graph separate from the clustering graph.
     """
-
     import scanpy as sc
 
     lcfg = cfg.lochness
-
     key = NEIGHBORS_KEY
     distances_key = f"{key}_distances"
-
-    if (
-        distances_key in expr.obsp
-        and not lcfg.recompute_neighbors
-    ):
-
-        logger.info(
-            "Reusing existing %r neighbour graph",
-            key,
-        )
-
-        return sparse.csr_matrix(
-            expr.obsp[distances_key]
-        )
-
+    if distances_key in expr.obsp and not lcfg.recompute_neighbors:
+        logger.info("Reusing existing %r neighbour graph", key)
+        return sparse.csr_matrix(expr.obsp[distances_key])
     use_rep = lcfg.use_rep
-
     if use_rep is None:
-
         # Prefer the batch-corrected embedding when available.
-        use_rep = (
-            "X_pca_harmony"
-            if "X_pca_harmony" in expr.obsm
-            else "X_pca"
-        )
-
+        use_rep = "X_pca_harmony" if "X_pca_harmony" in expr.obsm else "X_pca"
     if use_rep not in expr.obsm:
-
         raise ValueError(
-            f"lochness.use_rep={use_rep!r} is not in obsm "
-            f"(available: {sorted(expr.obsm)}); clustering must run first."
+            f"lochness.use_rep={use_rep!r} is not in obsm (available: {sorted(expr.obsm)}); clustering must run first."
         )
-
-    k = int(
-        min(
-            lcfg.n_neighbors,
-            max(expr.n_obs - 1, 2),
-        )
-    )
-
+    k = int(min(lcfg.n_neighbors, max(expr.n_obs - 1, 2)))
     if k < lcfg.n_neighbors:
-
-        logger.warning(
-            "Only %d cells available; using n_neighbors=%d instead of %d",
-            expr.n_obs,
-            k,
-            lcfg.n_neighbors,
-        )
-
-    n_pcs = (
-        min(
-            int(lcfg.n_pcs),
-            expr.obsm[use_rep].shape[1],
-        )
-        if lcfg.n_pcs
-        else None
-    )
-
-    logger.info(
-        "Building lochNESS neighbour graph "
-        "(k=%d, rep=%s) over %d cells",
-        k,
-        use_rep,
-        expr.n_obs,
-    )
-
-    sc.pp.neighbors(
-        expr,
-        n_neighbors=k,
-        n_pcs=n_pcs,
-        use_rep=use_rep,
-        key_added=key,
-        random_state=cfg.run.seed,
-    )
-
+        logger.warning("Only %d cells available; using n_neighbors=%d instead of %d", expr.n_obs, k, lcfg.n_neighbors)
+    n_pcs = min(int(lcfg.n_pcs), expr.obsm[use_rep].shape[1]) if lcfg.n_pcs else None
+    logger.info("Building lochNESS neighbour graph (k=%d, rep=%s) over %d cells", k, use_rep, expr.n_obs)
+    sc.pp.neighbors(expr, n_neighbors=k, n_pcs=n_pcs, use_rep=use_rep, key_added=key, random_state=cfg.run.seed)
     gc.collect()
-
-    return sparse.csr_matrix(
-        expr.obsp[distances_key]
-    )
+    return sparse.csr_matrix(expr.obsp[distances_key])
 
 
-# ---------------------------------------------------------------------------
 # Graph helpers
-# ---------------------------------------------------------------------------
 
 
-def _adjacency(
-    graph: sparse.csr_matrix,
-) -> Tuple[sparse.csr_matrix, np.ndarray]:
+def _adjacency(graph: sparse.csr_matrix) -> Tuple[sparse.csr_matrix, np.ndarray]:
     """Return binary adjacency plus actual neighbour count per cell."""
-
     adj = graph.tocsr(copy=True)
-
     # LochNESS only needs edge presence, not edge weight.
     # uint8 keeps the adjacency much smaller than float64.
-    adj.data = np.ones(
-        adj.data.shape,
-        dtype=np.uint8,
-    )
-
-    neighbour_counts = np.asarray(
-        adj.sum(axis=1)
-    ).ravel().astype(np.float32)
-
+    adj.data = np.ones(adj.data.shape, dtype=np.uint8)
+    neighbour_counts = np.asarray(adj.sum(axis=1)).ravel().astype(np.float32)
     # Avoid division by zero.
-    neighbour_counts[
-        neighbour_counts == 0
-    ] = np.nan
-
-    return (
-        adj,
-        neighbour_counts,
-    )
+    neighbour_counts[neighbour_counts == 0] = np.nan
+    return (adj, neighbour_counts)
 
 
-# ---------------------------------------------------------------------------
 # Standard full-score implementation
-# ---------------------------------------------------------------------------
 
 
 def lochness_score(
-    adj: sparse.csr_matrix,
-    neighbor_counts: np.ndarray,
-    indicator: np.ndarray,
-    overall_fraction: float,
+    adj: sparse.csr_matrix, neighbor_counts: np.ndarray, indicator: np.ndarray, overall_fraction: float
 ) -> np.ndarray:
     """Calculate lochNESS for one perturbation over all cells.
 
@@ -379,52 +231,19 @@ def lochness_score(
     The local perturbation count is obtained by one sparse matrix-vector
     multiplication.
     """
-
     if overall_fraction <= 0:
-
-        return np.full(
-            adj.shape[0],
-            np.nan,
-            dtype=np.float32,
-        )
-
-    indicator = np.asarray(
-        indicator,
-        dtype=np.float32,
-    )
-
+        return np.full(adj.shape[0], np.nan, dtype=np.float32)
+    indicator = np.asarray(indicator, dtype=np.float32)
     local_count = adj @ indicator
-
-    local_fraction = (
-        np.asarray(
-            local_count,
-            dtype=np.float32,
-        )
-        / neighbor_counts
-    )
-
-    score = (
-        local_fraction
-        / np.float32(overall_fraction)
-        - np.float32(1.0)
-    )
-
-    return score.astype(
-        np.float32,
-        copy=False,
-    )
+    local_fraction = np.asarray(local_count, dtype=np.float32) / neighbor_counts
+    score = local_fraction / np.float32(overall_fraction) - np.float32(1.0)
+    return score.astype(np.float32, copy=False)
 
 
-# ---------------------------------------------------------------------------
 # Million-cell self-score implementation
-# ---------------------------------------------------------------------------
 
 
-def _compute_self_lochness(
-    adj: sparse.csr_matrix,
-    neighbor_counts: np.ndarray,
-    labels: np.ndarray,
-) -> np.ndarray:
+def _compute_self_lochness(adj: sparse.csr_matrix, neighbor_counts: np.ndarray, labels: np.ndarray) -> np.ndarray:
     """Compute lochNESS for each cell's own perturbation only.
 
     For cell i carrying perturbation g_i:
@@ -440,332 +259,113 @@ def _compute_self_lochness(
     available. Otherwise a numerically equivalent pure-Python implementation is
     used.
     """
-
     n_cells = adj.shape[0]
-
     # Convert arbitrary string labels to compact integer IDs.
-    codes, unique_labels = pd.factorize(
-        labels,
-        sort=False,
-    )
-
-    codes = codes.astype(
-        np.int32,
-        copy=False,
-    )
-
+    codes, unique_labels = pd.factorize(labels, sort=False)
+    codes = codes.astype(np.int32, copy=False)
     valid_codes = codes >= 0
-
-    label_counts = np.bincount(
-        codes[valid_codes],
-        minlength=len(unique_labels),
-    )
-
-    overall_fraction = (
-        label_counts.astype(np.float64)
-        / float(n_cells)
-    )
-
+    label_counts = np.bincount(codes[valid_codes], minlength=len(unique_labels))
+    overall_fraction = label_counts.astype(np.float64) / float(n_cells)
     # CSR indexing arrays.
     #
     # Keep native-width integers when possible rather than forcing a copy to
     # int64 unnecessarily.
-    indptr = np.asarray(
-        adj.indptr
-    )
-
-    indices = np.asarray(
-        adj.indices
-    )
-
+    indptr = np.asarray(adj.indptr)
+    indices = np.asarray(adj.indices)
     if NUMBA_AVAILABLE:
-
         logger.info(
-            "Computing self-lochNESS with Numba parallel backend "
-            "(%d cells, %d neighbour edges, %d threads)",
+            "Computing self-lochNESS with Numba parallel backend (%d cells, %d neighbour edges, %d threads)",
             n_cells,
             len(indices),
             numba.get_num_threads(),
         )
-
-        same_neighbor_counts = (
-            _count_same_label_neighbors_numba(
-                indptr,
-                indices,
-                codes,
-            )
-        )
-
+        same_neighbor_counts = _count_same_label_neighbors_numba(indptr, indices, codes)
     else:
-
         logger.warning(
             "Numba is unavailable; using pure-Python self-lochNESS backend. "
             "Install numba for substantially faster million-cell execution."
         )
-
-        same_neighbor_counts = (
-            _count_same_label_neighbors_python(
-                indptr,
-                indices,
-                codes,
-            )
-        )
-
-    local_fraction = (
-        same_neighbor_counts
-        / neighbor_counts
-    )
-
-    denominators = np.full(
-        n_cells,
-        np.nan,
-        dtype=np.float32,
-    )
-
-    valid = (
-        valid_codes
-        & np.isfinite(neighbor_counts)
-    )
-
-    denominators[valid] = (
-        overall_fraction[
-            codes[valid]
-        ].astype(np.float32)
-    )
-
+        same_neighbor_counts = _count_same_label_neighbors_python(indptr, indices, codes)
+    local_fraction = same_neighbor_counts / neighbor_counts
+    denominators = np.full(n_cells, np.nan, dtype=np.float32)
+    valid = valid_codes & np.isfinite(neighbor_counts)
+    denominators[valid] = overall_fraction[codes[valid]].astype(np.float32)
     valid &= denominators > 0
-
-    self_score = np.full(
-        n_cells,
-        np.nan,
-        dtype=np.float32,
-    )
-
-    self_score[valid] = (
-        local_fraction[valid]
-        / denominators[valid]
-        - np.float32(1.0)
-    )
-
+    self_score = np.full(n_cells, np.nan, dtype=np.float32)
+    self_score[valid] = local_fraction[valid] / denominators[valid] - np.float32(1.0)
     del same_neighbor_counts
     del denominators
     del codes
     del unique_labels
     del label_counts
-
     gc.collect()
-
     return self_score
 
 
-# ---------------------------------------------------------------------------
 # Large-mode summaries
-# ---------------------------------------------------------------------------
 
 
 def _summarize_self_scores(
-    expr: ad.AnnData,
-    labels: np.ndarray,
-    klass: np.ndarray,
-    self_score: np.ndarray,
-    cfg: Config,
-) -> Tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-]:
+    expr: ad.AnnData, labels: np.ndarray, klass: np.ndarray, self_score: np.ndarray, cfg: Config
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Summarize self-lochNESS by target and target × Leiden cluster."""
-
     lcfg = cfg.lochness
-
-    targeting_mask = (
-        klass == CLASS_TARGETING
-    )
-
-    target_labels = labels[
-        targeting_mask
-    ]
-
-    target_scores = self_score[
-        targeting_mask
-    ]
-
-    counts = pd.Series(
-        target_labels
-    ).value_counts()
-
-    keep_targets = counts[
-        counts >= lcfg.min_cells_per_target
-    ].index
-
+    targeting_mask = klass == CLASS_TARGETING
+    target_labels = labels[targeting_mask]
+    target_scores = self_score[targeting_mask]
+    counts = pd.Series(target_labels).value_counts()
+    keep_targets = counts[counts >= lcfg.min_cells_per_target].index
     skipped = pd.DataFrame(
         [
-            {
-                "target_gene": target,
-                "n_cells": int(n),
-                "reason": (
-                    f"fewer than "
-                    f"{lcfg.min_cells_per_target} cells"
-                ),
-            }
+            {"target_gene": target, "n_cells": int(n), "reason": (f"fewer than {lcfg.min_cells_per_target} cells")}
             for target, n in counts.items()
             if n < lcfg.min_cells_per_target
         ]
     )
-
-    keep_mask = np.isin(
-        target_labels,
-        keep_targets,
-    )
-
-    frame = pd.DataFrame(
-        {
-            "target_gene": (
-                target_labels[
-                    keep_mask
-                ]
-            ),
-            "score": (
-                target_scores[
-                    keep_mask
-                ]
-            ),
-        }
-    )
-
+    keep_mask = np.isin(target_labels, keep_targets)
+    frame = pd.DataFrame({"target_gene": (target_labels[keep_mask]), "score": (target_scores[keep_mask])})
     if frame.empty:
-
-        return (
-            pd.DataFrame(),
-            skipped,
-            pd.DataFrame(),
-        )
-
-    grouped = frame.groupby(
-        "target_gene",
-        observed=True,
-    )
-
+        return (pd.DataFrame(), skipped, pd.DataFrame())
+    grouped = frame.groupby("target_gene", observed=True)
     summary = (
         grouped["score"]
-        .agg(
-            [
-                "size",
-                "mean",
-                "median",
-                "max",
-            ]
-        )
+        .agg(["size", "mean", "median", "max"])
         .rename(
             columns={
                 "size": "n_cells",
-                "mean": (
-                    "mean_lochness_in_own_cells"
-                ),
-                "median": (
-                    "median_lochness_in_own_cells"
-                ),
+                "mean": ("mean_lochness_in_own_cells"),
+                "median": ("median_lochness_in_own_cells"),
                 "max": "max_lochness",
             }
         )
         .reset_index()
     )
-
     enriched_fraction = (
-        frame
-        .assign(
-            enriched=(
-                frame["score"]
-                > lcfg.enrichment_cut
-            )
-        )
-        .groupby(
-            "target_gene",
-            observed=True,
-        )["enriched"]
+        frame.assign(enriched=(frame["score"] > lcfg.enrichment_cut))
+        .groupby("target_gene", observed=True)["enriched"]
         .mean()
         .mul(100.0)
     )
-
-    summary[
-        "pct_own_cells_enriched"
-    ] = (
-        summary["target_gene"]
-        .map(enriched_fraction)
-        .astype(float)
-    )
-
-    summary = (
-        summary
-        .sort_values(
-            "mean_lochness_in_own_cells",
-            ascending=False,
-        )
-        .reset_index(drop=True)
-    )
-
+    summary["pct_own_cells_enriched"] = summary["target_gene"].map(enriched_fraction).astype(float)
+    summary = summary.sort_values("mean_lochness_in_own_cells", ascending=False).reset_index(drop=True)
     by_cluster = pd.DataFrame()
-
     if CLUSTER_KEY in expr.obs.columns:
-
-        target_clusters = (
-            expr.obs.loc[
-                targeting_mask,
-                CLUSTER_KEY,
-            ]
-            .astype(str)
-            .to_numpy()
-        )
-
+        target_clusters = expr.obs.loc[targeting_mask, CLUSTER_KEY].astype(str).to_numpy()
         cluster_frame = pd.DataFrame(
             {
-                "target_gene": (
-                    target_labels[
-                        keep_mask
-                    ]
-                ),
-                "cluster": (
-                    target_clusters[
-                        keep_mask
-                    ]
-                ),
-                "score": (
-                    target_scores[
-                        keep_mask
-                    ]
-                ),
+                "target_gene": (target_labels[keep_mask]),
+                "cluster": (target_clusters[keep_mask]),
+                "score": (target_scores[keep_mask]),
             }
         )
-
-        by_cluster = (
-            cluster_frame
-            .groupby(
-                [
-                    "target_gene",
-                    "cluster",
-                ],
-                observed=True,
-            )["score"]
-            .mean()
-            .unstack()
-        )
-
-    return (
-        summary,
-        skipped,
-        by_cluster,
-    )
+        by_cluster = cluster_frame.groupby(["target_gene", "cluster"], observed=True)["score"].mean().unstack()
+    return (summary, skipped, by_cluster)
 
 
-# ---------------------------------------------------------------------------
 # Main API
-# ---------------------------------------------------------------------------
 
 
-def compute_lochness(
-    expr: ad.AnnData,
-    cfg: Config,
-) -> Optional[LochnessResults]:
+def compute_lochness(expr: ad.AnnData, cfg: Config) -> Optional[LochnessResults]:
     """Score perturbation neighbourhood enrichment.
 
     Standard mode
@@ -777,155 +377,55 @@ def compute_lochness(
     Computes only ``lochness_self`` plus target-level summaries, avoiding the
     full cells × perturbations representation.
     """
-
     lcfg = cfg.lochness
-
     if not lcfg.enabled:
-
-        logger.info(
-            "lochNESS disabled "
-            "(lochness.enabled: false)"
-        )
-
+        logger.info("lochNESS disabled (lochness.enabled: false)")
         return None
-
     decision = resolve_stage_backend("lochness", cfg, n_cells=expr.n_obs)
     if cfg.compute.log_backend_decisions:
         log_compute_decision(decision)
-
     if NUMBA_AVAILABLE and numba is not None:
         try:
             numba.set_num_threads(decision.n_jobs)
         except Exception:
             pass
-
     key = lcfg.genotype_key
-
     if key not in expr.obs.columns:
-
         raise ValueError(
-            f"lochness.genotype_key={key!r} "
-            f"is not an obs column "
-            f"(available: "
-            f"{sorted(expr.obs.columns)[:20]})"
+            f"lochness.genotype_key={key!r} is not an obs column (available: {sorted(expr.obs.columns)[:20]})"
         )
-
-    labels = (
-        expr.obs[key]
-        .astype(str)
-        .to_numpy()
-    )
-
+    labels = expr.obs[key].astype(str).to_numpy()
     klass = (
-        expr.obs[OBS_CLASS]
-        .astype(str)
-        .to_numpy()
+        expr.obs[OBS_CLASS].astype(str).to_numpy()
         if OBS_CLASS in expr.obs.columns
-        else np.full(
-            expr.n_obs,
-            CLASS_TARGETING,
-            dtype=object,
-        )
+        else np.full(expr.n_obs, CLASS_TARGETING, dtype=object)
     )
-
-    target_counts = (
-        pd.Series(
-            labels[
-                klass == CLASS_TARGETING
-            ]
-        )
-        .value_counts()
-    )
-
-    eligible_targets = target_counts[
-        target_counts
-        >= lcfg.min_cells_per_target
-    ]
-
-    n_targets = len(
-        eligible_targets
-    )
-
-    large_mode = (
-        cfg.use_large_mode(
-            expr.n_obs,
-            n_perturbations=n_targets,
-        )
-    )
-
-    logger.info(
-        "lochNESS input: %d cells, "
-        "%d eligible target perturbations",
-        expr.n_obs,
-        n_targets,
-    )
-
+    target_counts = pd.Series(labels[klass == CLASS_TARGETING]).value_counts()
+    eligible_targets = target_counts[target_counts >= lcfg.min_cells_per_target]
+    n_targets = len(eligible_targets)
+    large_mode = cfg.use_large_mode(expr.n_obs, n_perturbations=n_targets)
+    logger.info("lochNESS input: %d cells, %d eligible target perturbations", expr.n_obs, n_targets)
     if large_mode:
-
         logger.info(
             "Large-dataset lochNESS mode enabled: "
             "computing lochness_self without "
             "materialising full cell × perturbation scores"
         )
-
-    graph = _build_neighbor_graph(
-        expr,
-        cfg,
-    )
-
-    adj, neighbor_counts = (
-        _adjacency(graph)
-    )
-
-    k_actual = float(
-        np.nanmedian(
-            neighbor_counts
-        )
-    )
-
-    logger.info(
-        "Neighbour graph: median %d neighbours per cell",
-        int(k_actual),
-    )
-
+    graph = _build_neighbor_graph(expr, cfg)
+    adj, neighbor_counts = _adjacency(graph)
+    k_actual = float(np.nanmedian(neighbor_counts))
+    logger.info("Neighbour graph: median %d neighbours per cell", int(k_actual))
     # ======================================================================
     # LARGE DATASET PATH
     # ======================================================================
-
     if large_mode:
-
-        self_score = (
-            _compute_self_lochness(
-                adj,
-                neighbor_counts,
-                labels,
-            )
-        )
-
-        (
-            summary,
-            skipped,
-            by_cluster,
-        ) = _summarize_self_scores(
-            expr,
-            labels,
-            klass,
-            self_score,
-            cfg,
-        )
-
+        self_score = _compute_self_lochness(adj, neighbor_counts, labels)
+        (summary, skipped, by_cluster) = _summarize_self_scores(expr, labels, klass, self_score, cfg)
         logger.info(
-            "lochNESS large-data mode complete: "
-            "%d targets summarized, "
-            "%d finite self-scores",
+            "lochNESS large-data mode complete: %d targets summarized, %d finite self-scores",
             len(summary),
-            int(
-                np.isfinite(
-                    self_score
-                ).sum()
-            ),
+            int(np.isfinite(self_score).sum()),
         )
-
         return LochnessResults(
             summary=summary,
             scores={},
@@ -941,324 +441,89 @@ def compute_lochness(
             ),
             self_only=True,
         )
-
     # ======================================================================
     # STANDARD FULL-SCORE PATH
     # ======================================================================
-
-    overall = (
-        pd.Series(labels)
-        .value_counts(
-            normalize=True
-        )
-        .to_dict()
-    )
-
-    counts = (
-        pd.Series(
-            labels[
-                klass
-                == CLASS_TARGETING
-            ]
-        )
-        .value_counts()
-    )
-
-    candidates = sorted(
-        counts[
-            counts
-            >= lcfg.min_cells_per_target
-        ].index
-    )
-
+    overall = pd.Series(labels).value_counts(normalize=True).to_dict()
+    counts = pd.Series(labels[klass == CLASS_TARGETING]).value_counts()
+    candidates = sorted(counts[counts >= lcfg.min_cells_per_target].index)
     skipped = pd.DataFrame(
         [
-            {
-                "target_gene": target,
-                "n_cells": int(n),
-                "reason": (
-                    f"fewer than "
-                    f"{lcfg.min_cells_per_target} cells"
-                ),
-            }
+            {"target_gene": target, "n_cells": int(n), "reason": (f"fewer than {lcfg.min_cells_per_target} cells")}
             for target, n in counts.items()
-            if n
-            < lcfg.min_cells_per_target
+            if n < lcfg.min_cells_per_target
         ]
     )
-
     if not candidates:
-
         return LochnessResults(
             summary=pd.DataFrame(),
             skipped=skipped,
-            note=(
-                "No target had enough cells "
-                "for a lochNESS score."
-            ),
+            note=("No target had enough cells for a lochNESS score."),
             n_neighbors=int(k_actual),
         )
-
-    clusters = (
-        expr.obs[
-            CLUSTER_KEY
-        ]
-        .astype(str)
-        .to_numpy()
-        if CLUSTER_KEY
-        in expr.obs.columns
-        else None
-    )
-
-    scores: Dict[
-        str,
-        np.ndarray,
-    ] = {}
-
+    clusters = expr.obs[CLUSTER_KEY].astype(str).to_numpy() if CLUSTER_KEY in expr.obs.columns else None
+    scores: Dict[str, np.ndarray] = {}
     rows: List[dict] = []
-
-    by_cluster_dict: Dict[
-        str,
-        Dict[str, float],
-    ] = {}
-
-    rng = np.random.default_rng(
-        cfg.run.seed
-    )
-
-    for idx, gene in enumerate(
-        candidates,
-        start=1,
-    ):
-
-        indicator = (
-            labels == gene
-        ).astype(np.float32)
-
-        score = lochness_score(
-            adj,
-            neighbor_counts,
-            indicator,
-            overall.get(
-                gene,
-                0.0,
-            ),
-        )
-
+    by_cluster_dict: Dict[str, Dict[str, float]] = {}
+    rng = np.random.default_rng(cfg.run.seed)
+    for idx, gene in enumerate(candidates, start=1):
+        indicator = (labels == gene).astype(np.float32)
+        score = lochness_score(adj, neighbor_counts, indicator, overall.get(gene, 0.0))
         if lcfg.noise_delta > 0:
-
-            score = (
-                score
-                + rng.normal(
-                    0,
-                    lcfg.noise_delta,
-                    size=score.shape,
-                ).astype(
-                    np.float32
-                )
-            )
-
+            score = score + rng.normal(0, lcfg.noise_delta, size=score.shape).astype(np.float32)
         scores[gene] = score
-
-        own_mask = (
-            indicator.astype(bool)
-        )
-
+        own_mask = indicator.astype(bool)
         row = {
             "target_gene": gene,
-            "n_cells": int(
-                own_mask.sum()
-            ),
-            "overall_fraction_pct": (
-                100.0
-                * overall.get(
-                    gene,
-                    0.0,
-                )
-            ),
-            "mean_lochness_all_cells": float(
-                np.nanmean(
-                    score
-                )
-            ),
-            "mean_lochness_in_own_cells": float(
-                np.nanmean(
-                    score[
-                        own_mask
-                    ]
-                )
-            ),
-            "max_lochness": float(
-                np.nanmax(
-                    score
-                )
-            ),
-            "pct_cells_enriched": float(
-                100.0
-                * np.nanmean(
-                    score
-                    > lcfg.enrichment_cut
-                )
-            ),
+            "n_cells": int(own_mask.sum()),
+            "overall_fraction_pct": (100.0 * overall.get(gene, 0.0)),
+            "mean_lochness_all_cells": float(np.nanmean(score)),
+            "mean_lochness_in_own_cells": float(np.nanmean(score[own_mask])),
+            "max_lochness": float(np.nanmax(score)),
+            "pct_cells_enriched": float(100.0 * np.nanmean(score > lcfg.enrichment_cut)),
         }
-
         if clusters is not None:
-
-            per_cluster = (
-                pd.Series(
-                    score
-                )
-                .groupby(
-                    clusters
-                )
-                .mean()
-            )
-
-            by_cluster_dict[
-                gene
-            ] = (
-                per_cluster.to_dict()
-            )
-
-            row[
-                "top_cluster"
-            ] = str(
-                per_cluster.idxmax()
-            )
-
-            row[
-                "top_cluster_mean"
-            ] = float(
-                per_cluster.max()
-            )
-
+            per_cluster = pd.Series(score).groupby(clusters).mean()
+            by_cluster_dict[gene] = per_cluster.to_dict()
+            row["top_cluster"] = str(per_cluster.idxmax())
+            row["top_cluster_mean"] = float(per_cluster.max())
         rows.append(row)
-
         if idx % 100 == 0:
-
-            logger.info(
-                "lochNESS full-score progress: "
-                "%d / %d targets",
-                idx,
-                len(candidates),
-            )
-
-    summary = (
-        pd.DataFrame(rows)
-        .sort_values(
-            "mean_lochness_in_own_cells",
-            ascending=False,
-        )
-        .reset_index(drop=True)
-    )
-
-    # -----------------------------------------------------------------------
+            logger.info("lochNESS full-score progress: %d / %d targets", idx, len(candidates))
+    summary = pd.DataFrame(rows).sort_values("mean_lochness_in_own_cells", ascending=False).reset_index(drop=True)
     # Build lochness_self from the full score vectors
-    # -----------------------------------------------------------------------
-
-    self_score = np.full(
-        expr.n_obs,
-        np.nan,
-        dtype=np.float32,
-    )
-
-    for gene, score in (
-        scores.items()
-    ):
-
-        mask = (
-            labels == gene
-        )
-
-        self_score[
-            mask
-        ] = score[
-            mask
-        ]
-
-    # -----------------------------------------------------------------------
+    self_score = np.full(expr.n_obs, np.nan, dtype=np.float32)
+    for gene, score in scores.items():
+        mask = labels == gene
+        self_score[mask] = score[mask]
     # NTC self-score
-    # -----------------------------------------------------------------------
-
-    ntc_mask = (
-        klass == CLASS_NTC
-    )
-
+    ntc_mask = klass == CLASS_NTC
     if ntc_mask.any():
-
-        ntc_labels = labels[
-            ntc_mask
-        ]
-
+        ntc_labels = labels[ntc_mask]
         if ntc_labels.size:
-
-            ntc_label = (
-                ntc_labels[0]
-            )
-
-            ntc_fraction = (
-                overall.get(
-                    ntc_label,
-                    0.0,
-                )
-            )
-
+            ntc_label = ntc_labels[0]
+            ntc_fraction = overall.get(ntc_label, 0.0)
             if ntc_fraction > 0:
-
-                ntc_score = (
-                    lochness_score(
-                        adj,
-                        neighbor_counts,
-                        ntc_mask.astype(
-                            np.float32
-                        ),
-                        ntc_fraction,
-                    )
-                )
-
-                self_score[
-                    ntc_mask
-                ] = ntc_score[
-                    ntc_mask
-                ]
-
+                ntc_score = lochness_score(adj, neighbor_counts, ntc_mask.astype(np.float32), ntc_fraction)
+                self_score[ntc_mask] = ntc_score[ntc_mask]
                 del ntc_score
-
     gc.collect()
-
-    logger.info(
-        "lochNESS complete: %d target(s) scored",
-        len(summary),
-    )
-
+    logger.info("lochNESS complete: %d target(s) scored", len(summary))
     return LochnessResults(
         summary=summary,
         scores=scores,
         self_score=self_score,
-        by_cluster=(
-            pd.DataFrame(
-                by_cluster_dict
-            ).T
-            if by_cluster_dict
-            else pd.DataFrame()
-        ),
+        by_cluster=(pd.DataFrame(by_cluster_dict).T if by_cluster_dict else pd.DataFrame()),
         n_neighbors=int(k_actual),
         skipped=skipped,
         self_only=False,
     )
 
 
-# ---------------------------------------------------------------------------
 # Attach scores
-# ---------------------------------------------------------------------------
 
 
-def attach_scores(
-    expr: ad.AnnData,
-    results: Optional[
-        LochnessResults
-    ],
-) -> ad.AnnData:
+def attach_scores(expr: ad.AnnData, results: Optional[LochnessResults]) -> ad.AnnData:
     """Write lochNESS scores into ``AnnData.obs``.
 
     Standard mode
@@ -1271,36 +536,11 @@ def attach_scores(
     columns for millions of cells would add enormous memory and file-size
     overhead without benefiting the downstream self-response analysis.
     """
-
     if results is None:
         return expr
-
-    if (
-        not results.self_only
-        and results.scores
-    ):
-
-        for gene, score in (
-            results.scores.items()
-        ):
-
-            expr.obs[
-                f"{LOCHNESS_PREFIX}{gene}"
-            ] = score.astype(
-                np.float32,
-                copy=False,
-            )
-
+    if not results.self_only and results.scores:
+        for gene, score in results.scores.items():
+            expr.obs[f"{LOCHNESS_PREFIX}{gene}"] = score.astype(np.float32, copy=False)
     if results.self_score is not None:
-
-        expr.obs[
-            LOCHNESS_SELF
-        ] = (
-            results.self_score
-            .astype(
-                np.float32,
-                copy=False,
-            )
-        )
-
+        expr.obs[LOCHNESS_SELF] = results.self_score.astype(np.float32, copy=False)
     return expr
