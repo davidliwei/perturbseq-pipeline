@@ -114,7 +114,9 @@ and downstream genes into **co-regulated programs** (Pearson-correlation
 clustering). It then relates the two — a signed module×program strength matrix
 and alluvial — and draws the TF-hub and module–module networks. Every cell is
 also scored for each program, and programs are annotated by over-representation
-against built-in gene-set collections. Modules (`M1..`) and programs (`P1..`)
+against full MSigDB collections (Hallmark, Reactome, GO BP; KEGG for human),
+downloaded at run time through gseapy for `input.species` (`human` or `mouse`)
+and the release in `modules.program_enrichment.msigdb_version`. Modules (`M1..`) and programs (`P1..`)
 are numbered clusters, not biological labels; their member TFs and top genes
 are in the tables so you can annotate them. The number of modules/programs is
 configurable (`modules.n_modules` / `modules.n_programs`, or an automatic

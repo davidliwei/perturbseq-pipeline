@@ -5,6 +5,7 @@ run:
   stop_after: null
 input:
   mode: auto
+  species: human
   mtx_dirs: null
   guide_mtx_dirs: null
   h5ad: null
@@ -240,7 +241,7 @@ modules:
   program_enrichment:
     enabled: true
     method: ora
-    species: human
+    msigdb_version: '2026.1'
     sources:
     - hallmark
     - reactome

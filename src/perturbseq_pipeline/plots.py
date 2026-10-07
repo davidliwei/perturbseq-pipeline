@@ -43,6 +43,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import gseapy
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -2153,59 +2154,42 @@ def _plot_networks(results, reg, cfg) -> None:
 
 
 def _plot_program_enrichment(results, reg: FigureRegistry, cfg: Config) -> None:
-    """Compact program x pathway enrichment dot plot."""
+    """Program x pathway dot plot (gseapy): the top significant terms of each program."""
     enr = getattr(results, "program_enrichment", None)
     if enr is None or enr.empty:
         return
-    pe_cfg = getattr(cfg.modules, "program_enrichment", None)
-    fdr_alpha = float(getattr(pe_cfg, "fdr_alpha", 0.05)) if pe_cfg else 0.05
-    top_n = int(getattr(pe_cfg, "top_terms_per_program", 5)) if pe_cfg else 5
-    # Filter to significant hits or fallback to top terms
-    sig = enr[enr["fdr"] <= fdr_alpha]
-    if sig.empty:
-        sig = enr.groupby("program_id", group_keys=False).head(2)
+    pe_cfg = cfg.modules.program_enrichment
+    # Top terms per program by p-value, picked here so the term that labels a program is always shown
+    # (gseapy's own pick ranks by FDR, where ties are common).
+    sig = enr[enr["fdr"] <= pe_cfg.fdr_alpha]
+    sig = sig.sort_values("p_value").groupby("program_id").head(pe_cfg.top_terms_per_program)
     if sig.empty:
         return
-    # Select top terms per program
-    selected = sig.sort_values(["program_id", "fdr", "p_value"]).groupby("program_id", as_index=False).head(top_n)
-    terms = selected["clean_term"].unique().tolist()
-    if not terms:
-        return
-    # Limit total terms so figure is readable and compact
-    if len(terms) > 30:
-        terms = terms[:30]
-        selected = selected[selected["clean_term"].isin(terms)]
-    progs = (
-        list(results.program_labels)
-        if getattr(results, "program_labels", None)
-        else sorted(selected["program_id"].unique())
+    display = getattr(results, "program_display_labels", {})
+    # gseapy.dotplot reads its own column names: colour from "Adjusted P-value", dot size from "Overlap" ("k/M").
+    df = pd.DataFrame(
+        {
+            "program": sig["program_id"].map(lambda p: display.get(p, p)),
+            "Term": sig["clean_term"],
+            "Adjusted P-value": sig["fdr"],
+            "Overlap": sig["overlap_count"].astype(str) + "/" + sig["gene_set_size"].astype(str),
+        }
     )
-    display_labels = getattr(results, "program_display_labels", {})
-    prog_labels = [display_labels.get(p, p) for p in progs]
-    term_to_y = {t: i for i, t in enumerate(terms)}
-    prog_to_x = {p: i for i, p in enumerate(progs)}
-    valid_mask = selected["program_id"].isin(prog_to_x) & selected["clean_term"].isin(term_to_y)
-    sel_valid = selected[valid_mask]
-    if sel_valid.empty:
-        return
-    xs = [prog_to_x[p] for p in sel_valid["program_id"]]
-    ys = [term_to_y[t] for t in sel_valid["clean_term"]]
-    fdrs = np.clip(sel_valid["fdr"].to_numpy(dtype=float), 1e-30, 1.0)
-    neg_log_fdr = -np.log10(fdrs)
-    overlaps = sel_valid["overlap_count"].to_numpy(dtype=float)
-    sizes = np.clip(overlaps * 18 + 25, 25, 350)
-    fig, ax = plt.subplots(figsize=(max(5, 0.9 * len(progs) + 2.5), max(3.5, 0.35 * len(terms) + 1.8)))
-    scatter = ax.scatter(xs, ys, s=sizes, c=neg_log_fdr, cmap="YlOrRd", edgecolors="black", linewidths=0.5, alpha=0.9)
-    ax.set_xticks(range(len(progs)))
-    ax.set_xticklabels(prog_labels, rotation=35, ha="right", rotation_mode="anchor", fontsize=8)
-    ax.set_yticks(range(len(terms)))
-    ax.set_yticklabels(terms, fontsize=8)
-    ax.set_title("Gene Program Pathway Enrichment", fontsize=11)
-    ax.grid(True, linestyle="--", alpha=0.3)
-    plt.colorbar(scatter, ax=ax, shrink=0.7, label="-log10(FDR)")
-    fig.tight_layout()
+    order = [display.get(p, p) for p in results.program_labels if display.get(p, p) in set(df["program"])]
+    n_terms = sig["clean_term"].nunique()
+    ax = gseapy.dotplot(
+        df,
+        column="Adjusted P-value",
+        x="program",
+        x_order=order,
+        cutoff=pe_cfg.fdr_alpha,
+        top_term=pe_cfg.top_terms_per_program,
+        title="Gene Program Pathway Enrichment",
+        xticklabels_rot=35,
+        figsize=(max(5, 0.9 * len(order) + 2.5), max(3.5, 0.35 * n_terms + 1.8)),
+    )
     reg.save(
-        fig,
+        ax.figure,
         "program_enrichment",
         SECTION_MODULES,
         "Program pathway enrichment",

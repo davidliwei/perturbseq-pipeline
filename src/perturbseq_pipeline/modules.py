@@ -901,7 +901,7 @@ def compute_modules(expr: ad.AnnData, cfg: Config) -> Optional[ModulesResults]:
     if pe_cfg is not None and getattr(pe_cfg, "enabled", True):
         try:
             enrichment_df, prog_annotations, prog_summary, display_labels = run_program_enrichment(
-                program_genes=program_genes, universe=genes, cfg=pe_cfg
+                program_genes=program_genes, universe=genes, cfg=pe_cfg, species=cfg.input.species
             )
             n_annotated = sum(1 for a in prog_annotations.values() if a != "unannotated")
             logger.info(
