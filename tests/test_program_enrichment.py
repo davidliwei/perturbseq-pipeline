@@ -9,17 +9,7 @@ import pandas as pd
 import pytest
 
 from perturbseq_pipeline.config import Config, ProgramEnrichmentConfig
-from perturbseq_pipeline.gene_sets import (
-    adapt_gene_set_to_species,
-    benjamini_hochberg,
-    clean_term_name,
-    format_display_label,
-    normalize_species_name,
-    parse_gmt,
-    run_ora_enrichment,
-    run_program_enrichment,
-    HALLMARK_GENE_SETS,
-)
+from perturbseq_pipeline.gene_sets import clean_term_name, format_display_label, run_program_enrichment
 from perturbseq_pipeline.guides import CLASS_NTC, CLASS_TARGETING, OBS_CLASS, OBS_TARGET
 from perturbseq_pipeline.modules import compute_modules
 
@@ -103,68 +93,44 @@ def test_term_cleaner_and_display_labels():
     assert format_display_label("P3", "no significant enrichment") == "P3"
 
 
-def test_species_handling():
-    """Verify safe handling of species strings and symbol casing."""
-    assert normalize_species_name("human") == "human"
-    assert normalize_species_name("Homo_sapiens") == "human"
-    assert normalize_species_name("mouse") == "mouse"
-    assert normalize_species_name("Mus_musculus") == "mouse"
-    human_genes = ["ISG15", "IFIT1", "STAT1"]
-    mouse_genes = adapt_gene_set_to_species(human_genes, "mouse")
-    assert mouse_genes == ["Isg15", "Ifit1", "Stat1"]
-    human_adapted = adapt_gene_set_to_species(["isg15", "ifit1"], "human")
-    assert human_adapted == ["ISG15", "IFIT1"]
+def test_mouse_kegg_needs_gmt(tmp_path):
+    """MSigDB has no mouse KEGG collection, so a mouse run asking for KEGG must name a GMT file."""
+    cfg = Config()
+    cfg.input.h5ad = "x.h5ad"
+    cfg.input.species = "mouse"
+    cfg.modules.program_enrichment.sources = ["hallmark", "kegg"]
+    with pytest.raises(ValueError, match="no mouse KEGG"):
+        cfg.validate()
+    gmt = tmp_path / "kegg.gmt"
+    gmt.write_text("KEGG_X\tdesc\tGene1\tGene2\n")
+    cfg.modules.program_enrichment.custom_gmt_files = {"kegg": str(gmt)}
+    cfg.validate()
 
 
-def test_ora_hypergeometric_exact_math():
-    """Verify ORA hypergeometric calculation against theoretical known values."""
-    # Universe of 100 genes, gene set has 20 genes.
-    # Program has 10 genes, with 8 in the gene set.
+def test_ora_hypergeometric_exact_math(tmp_path):
+    """gseapy ORA through run_program_enrichment gives the exact hypergeometric p and drops low overlaps."""
+    from scipy.stats import hypergeom
+
     universe = [f"G_{i}" for i in range(100)]
-    gene_set = [f"G_{i}" for i in range(20)]
     query = [f"G_{i}" for i in range(8)] + ["G_90", "G_91"]
-    res = run_ora_enrichment(
-        query_genes=query,
-        universe_genes=universe,
-        gene_sets={"TEST_SET": gene_set},
-        source_name="test_source",
-        source_version="v1.0",
-        species="human",
-        min_overlap=2,
-        min_genes=5,
+    gmt = tmp_path / "custom.gmt"
+    gmt.write_text(
+        "TEST_SET\tdesc\t" + "\t".join(f"G_{i}" for i in range(20)) + "\n"
+        "ONE_OVERLAP\tdesc\t" + "\t".join(f"G_{i}" for i in [90] + list(range(30, 39))) + "\n"
     )
-    assert len(res) == 1
-    hit = res[0]
+    pe = Config().modules.program_enrichment
+    pe.sources = ["custom"]
+    pe.custom_gmt_files = {"custom": str(gmt)}
+    enr, ann, summary, _ = run_program_enrichment({"P1": query}, universe, pe, species="human")
+    assert enr["term"].tolist() == ["TEST_SET"]  # ONE_OVERLAP shares 1 gene, below min_overlap=2
+    hit = enr.iloc[0]
     assert hit["overlap_count"] == 8
     assert hit["program_size"] == 10
     assert hit["gene_set_size"] == 20
     assert hit["background_size"] == 100
-    assert hit["p_value"] < 1e-4
-    assert hit["odds_ratio"] > 10.0
-
-
-def test_benjamini_hochberg_monotonicity():
-    """Verify multiple testing correction computes valid FDR values."""
-    p_vals = np.array([0.001, 0.01, 0.02, 0.05, 0.5, 0.9])
-    fdr = benjamini_hochberg(p_vals)
-    assert len(fdr) == len(p_vals)
-    assert np.all(fdr >= 0.0) and np.all(fdr <= 1.0)
-    # Monotonicity check
-    for i in range(len(fdr) - 1):
-        assert fdr[i] <= fdr[i + 1]
-
-
-def test_parse_custom_gmt(tmp_path):
-    """Verify parsing user-provided GMT files."""
-    gmt_file = tmp_path / "custom.gmt"
-    content = (
-        "CUSTOM_PATHWAY_1\thttps://example.org\tGENE1\tGENE2\tGENE3\nCUSTOM_PATHWAY_2\tDescription\tGENE4\tGENE5\n"
-    )
-    gmt_file.write_text(content)
-    parsed = parse_gmt(gmt_file)
-    assert len(parsed) == 2
-    assert parsed["CUSTOM_PATHWAY_1"] == ["GENE1", "GENE2", "GENE3"]
-    assert parsed["CUSTOM_PATHWAY_2"] == ["GENE4", "GENE5"]
+    assert np.isclose(hit["p_value"], hypergeom.sf(7, 100, 20, 10), rtol=1e-12)
+    assert ann["P1"] == "Test Set"
+    assert summary.loc[0, "top_term"] == "TEST_SET"
 
 
 # Stage 7 Integration Tests
@@ -297,7 +263,6 @@ def test_pipeline_end_to_end_program_enrichment(tmp_path):
                 "draw_networks": False,
                 "program_enrichment": {
                     "enabled": True,
-                    "species": "human",
                     "sources": ["hallmark", "reactome", "go_bp"],
                     "fdr_alpha": 0.05,
                     "top_terms_per_program": 5,

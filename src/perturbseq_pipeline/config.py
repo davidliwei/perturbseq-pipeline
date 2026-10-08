@@ -125,6 +125,8 @@ class InputConfig:
     """
 
     mode: str = "auto"  # auto | mtx | h5ad
+    #: ``human`` or ``mouse``. Picks the MSigDB gene-set collections for program enrichment.
+    species: str = "human"
     mtx_dirs: Union[Dict[str, str], List[str], None] = None
     guide_mtx_dirs: Optional[Dict[str, str]] = None
     h5ad: Optional[str] = None
@@ -491,7 +493,8 @@ class ProgramEnrichmentConfig:
 
     enabled: bool = True
     method: str = "ora"
-    species: str = "human"
+    #: MSigDB release; the species suffix (.Hs / .Mm) comes from ``input.species``.
+    msigdb_version: str = "2026.1"
     sources: List[str] = field(default_factory=lambda: ["hallmark", "reactome", "go_bp"])
     custom_gmt_files: Dict[str, str] = field(default_factory=dict)
     fdr_alpha: float = 0.05
@@ -1181,6 +1184,8 @@ class Config:
         inp = self.input
         if inp.mode not in ("auto", "mtx", "h5ad"):
             raise ValueError(f"input.mode must be one of 'auto', 'mtx', 'h5ad' (got {inp.mode!r})")
+        if inp.species not in ("human", "mouse"):
+            raise ValueError(f"input.species must be 'human' or 'mouse' (got {inp.species!r})")
         has_mtx = bool(inp.resolved_mtx_dirs())
         has_h5ad = bool(inp.h5ad)
         if inp.mode == "mtx" and not has_mtx:
@@ -1349,6 +1354,12 @@ class Config:
                 raise ValueError("modules.program_enrichment.max_genes must be >= min_genes")
             if pe_cfg.top_terms_per_program < 1:
                 raise ValueError("modules.program_enrichment.top_terms_per_program must be >= 1")
+            # Without this the run would only log a warning and leave KEGG out of the annotations.
+            if self.input.species == "mouse" and "kegg" in pe_cfg.sources and "kegg" not in pe_cfg.custom_gmt_files:
+                raise ValueError(
+                    "MSigDB has no mouse KEGG collection: remove 'kegg' from "
+                    "modules.program_enrichment.sources or give a GMT file in custom_gmt_files['kegg']"
+                )
             if pe_cfg.custom_gmt_files:
                 for src_name, path in pe_cfg.custom_gmt_files.items():
                     if not Path(path).is_file():
