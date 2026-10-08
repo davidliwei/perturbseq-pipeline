@@ -44,9 +44,7 @@ import pandas as pd
 logger = logging.getLogger("perturbseq_pipeline.compute")
 
 
-# ---------------------------------------------------------------------------
 # Hardware & Environment Detection
-# ---------------------------------------------------------------------------
 
 
 def detect_slurm_cpus() -> Optional[int]:
@@ -62,7 +60,6 @@ def detect_slurm_cpus() -> Optional[int]:
                 return val
         except (ValueError, TypeError):
             pass
-
     for var in ("SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
         if var in os.environ:
             raw = os.environ[var].strip()
@@ -74,7 +71,6 @@ def detect_slurm_cpus() -> Optional[int]:
                         return val
                 except (ValueError, TypeError):
                     pass
-
     return None
 
 
@@ -87,7 +83,6 @@ def detect_available_cpus() -> int:
     slurm_cpus = detect_slurm_cpus()
     if slurm_cpus is not None and slurm_cpus > 0:
         return slurm_cpus
-
     if hasattr(os, "sched_getaffinity"):
         try:
             affinity = os.sched_getaffinity(0)
@@ -95,14 +90,10 @@ def detect_available_cpus() -> int:
                 return len(affinity)
         except Exception:
             pass
-
     return max(1, os.cpu_count() or 1)
 
 
-def resolve_worker_count(
-    configured_n_jobs: Any,
-    stage_n_jobs: Optional[Any] = None,
-) -> int:
+def resolve_worker_count(configured_n_jobs: Any, stage_n_jobs: Optional[Any] = None) -> int:
     """Determine effective deterministic CPU worker count.
 
     Accepts either (cfg, stage_name) or (configured_n_jobs, stage_n_jobs).
@@ -127,14 +118,11 @@ def resolve_worker_count(
         req = stage_override if stage_override is not None else comp.n_jobs
     else:
         req = stage_n_jobs if stage_n_jobs is not None else configured_n_jobs
-
     avail = detect_available_cpus()
-
     if req == -1:
         return max(1, avail)
     if req < 1:
         return 1
-
     return max(1, min(req, avail))
 
 
@@ -157,7 +145,6 @@ def is_gpu_available() -> bool:
             return True
     except Exception:
         pass
-
     # 2. CuPy check
     try:
         import cupy as cp
@@ -166,7 +153,6 @@ def is_gpu_available() -> bool:
             return True
     except Exception:
         pass
-
     # 3. pynvml / nvidia-smi device check
     try:
         import pynvml
@@ -178,7 +164,6 @@ def is_gpu_available() -> bool:
             return True
     except Exception:
         pass
-
     return False
 
 
@@ -193,7 +178,6 @@ def get_gpu_memory_info(device: int = 0) -> Tuple[int, int]:
             return int(free_b), int(total_b)
     except Exception:
         pass
-
     # 2. Try CuPy
     try:
         import cupy as cp
@@ -204,7 +188,6 @@ def get_gpu_memory_info(device: int = 0) -> Tuple[int, int]:
                 return int(free_b), int(total_b)
     except Exception:
         pass
-
     # 3. Try pynvml
     try:
         import pynvml
@@ -217,15 +200,10 @@ def get_gpu_memory_info(device: int = 0) -> Tuple[int, int]:
         return int(free_b), int(total_b)
     except Exception:
         pass
-
     return 0, 0
 
 
-def estimate_gpu_memory_safe(
-    estimated_bytes: int,
-    device: int = 0,
-    fraction: float = 0.80,
-) -> bool:
+def estimate_gpu_memory_safe(estimated_bytes: int, device: int = 0, fraction: float = 0.80) -> bool:
     """Check if the estimated byte footprint fits safely in free GPU memory."""
     free_b, total_b = get_gpu_memory_info(device)
     if total_b <= 0 or free_b <= 0:
@@ -233,9 +211,7 @@ def estimate_gpu_memory_safe(
     return estimated_bytes <= int(free_b * fraction)
 
 
-# ---------------------------------------------------------------------------
 # Backend Decision Layer
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -258,10 +234,7 @@ class ComputeDecision:
 
 
 def resolve_stage_backend(
-    stage: str,
-    cfg: Any,
-    n_cells: int = 0,
-    extra_info: Optional[Dict[str, Any]] = None,
+    stage: str, cfg: Any, n_cells: int = 0, extra_info: Optional[Dict[str, Any]] = None
 ) -> ComputeDecision:
     """Resolve CPU vs GPU execution backend and worker count for a stage.
 
@@ -287,12 +260,10 @@ def resolve_stage_backend(
     req_backend = comp.backend.lower()
     device = comp.gpu_device
     extra_info = extra_info or {}
-
     # Check stage-specific n_jobs override
     stage_override_attr = f"{stage}_n_jobs"
     stage_n_jobs = getattr(comp, stage_override_attr, None)
     resolved_workers = resolve_worker_count(comp.n_jobs, stage_n_jobs)
-
     # 1. CPU forced
     if req_backend == "cpu":
         return ComputeDecision(
@@ -302,16 +273,12 @@ def resolve_stage_backend(
             reason="CPU backend explicitly forced in compute.backend",
             device=device,
         )
-
     gpu_ok = is_gpu_available()
-
     # 2. GPU forced
     if req_backend == "gpu":
         if not gpu_ok:
             logger.warning(
-                "[compute] GPU requested for stage %r but no compatible GPU was detected. "
-                "Falling back to CPU.",
-                stage,
+                "[compute] GPU requested for stage %r but no compatible GPU was detected. Falling back to CPU.", stage
             )
             return ComputeDecision(
                 stage=stage,
@@ -320,14 +287,13 @@ def resolve_stage_backend(
                 reason="GPU requested but no CUDA device detected; falling back to CPU",
                 device=device,
             )
-
         # Check if stage is GPU capable
         if stage == "clustering":
             has_rapids = is_package_available("rapids_singlecell") or is_package_available("cuml")
             if not has_rapids:
                 logger.warning(
                     "[compute] GPU requested for clustering but RAPIDS (rapids-singlecell / cuml) "
-                    "is not installed. Falling back to CPU Scanpy.",
+                    "is not installed. Falling back to CPU Scanpy."
                 )
                 return ComputeDecision(
                     stage=stage,
@@ -357,7 +323,6 @@ def resolve_stage_backend(
                 reason="GPU backend explicitly requested and memory-safe",
                 device=device,
             )
-
         elif stage == "modules_correlation":
             has_cupy = is_package_available("cupy")
             if not has_cupy:
@@ -379,13 +344,8 @@ def resolve_stage_backend(
                     device=device,
                 )
             return ComputeDecision(
-                stage=stage,
-                backend="gpu",
-                n_jobs=1,
-                reason="GPU backend requested and memory-safe",
-                device=device,
+                stage=stage, backend="gpu", n_jobs=1, reason="GPU backend requested and memory-safe", device=device
             )
-
         elif stage == "distance_space":
             has_cupy = is_package_available("cupy") or is_package_available("torch")
             if not has_cupy:
@@ -397,13 +357,8 @@ def resolve_stage_backend(
                     device=device,
                 )
             return ComputeDecision(
-                stage=stage,
-                backend="gpu",
-                n_jobs=1,
-                reason="GPU distance space requested",
-                device=device,
+                stage=stage, backend="gpu", n_jobs=1, reason="GPU distance space requested", device=device
             )
-
         else:
             return ComputeDecision(
                 stage=stage,
@@ -412,7 +367,6 @@ def resolve_stage_backend(
                 reason=f"Stage {stage!r} is intentionally CPU-parallel; remaining on CPU",
                 device=device,
             )
-
     # 3. AUTO backend
     if req_backend == "auto":
         if stage == "clustering":
@@ -437,14 +391,9 @@ def resolve_stage_backend(
                 reason="AUTO: dataset scale or hardware suited for CPU Scanpy",
                 device=device,
             )
-
         elif stage == "modules_correlation":
             dense_elem = extra_info.get("n_dense_elements", 0)
-            if (
-                gpu_ok
-                and dense_elem >= comp.gpu_min_dense_elements
-                and is_package_available("cupy")
-            ):
+            if gpu_ok and dense_elem >= comp.gpu_min_dense_elements and is_package_available("cupy"):
                 est_mem = int(dense_elem * 8 * 3)
                 if estimate_gpu_memory_safe(est_mem, device, comp.gpu_memory_fraction):
                     return ComputeDecision(
@@ -461,7 +410,6 @@ def resolve_stage_backend(
                 reason="AUTO: dense matrix size suited for CPU NumPy/SciPy",
                 device=device,
             )
-
         elif stage == "lochness":
             return ComputeDecision(
                 stage=stage,
@@ -470,7 +418,6 @@ def resolve_stage_backend(
                 reason="AUTO: lochNESS executes on CPU via vectorized Numba parallel kernel",
                 device=device,
             )
-
         elif stage in ("perturbation", "enrichment", "distance", "distance_space", "ps_score"):
             return ComputeDecision(
                 stage=stage,
@@ -479,7 +426,6 @@ def resolve_stage_backend(
                 reason=f"AUTO: {stage} executes on CPU with multiprocessing",
                 device=device,
             )
-
         else:
             return ComputeDecision(
                 stage=stage,
@@ -488,39 +434,22 @@ def resolve_stage_backend(
                 reason=f"AUTO: {stage} executes on CPU",
                 device=device,
             )
-
     # Fallback default
     return ComputeDecision(
-        stage=stage,
-        backend="cpu",
-        n_jobs=resolved_workers,
-        reason="Default CPU fallback",
-        device=device,
+        stage=stage, backend="cpu", n_jobs=resolved_workers, reason="Default CPU fallback", device=device
     )
 
 
 def log_compute_decision(decision: ComputeDecision) -> None:
     """Log the compute decision formatted cleanly."""
     if decision.backend.lower() == "gpu":
-        logger.info(
-            "[compute] %s backend: GPU (device %d) — %s",
-            decision.stage,
-            decision.device,
-            decision.reason,
-        )
+        logger.info("[compute] %s backend: GPU (device %d) — %s", decision.stage, decision.device, decision.reason)
     else:
         workers_str = f" ({decision.n_jobs} workers)" if decision.n_jobs > 1 else ""
-        logger.info(
-            "[compute] %s backend: CPU%s — %s",
-            decision.stage,
-            workers_str,
-            decision.reason,
-        )
+        logger.info("[compute] %s backend: CPU%s — %s", decision.stage, workers_str, decision.reason)
 
 
-# ---------------------------------------------------------------------------
 # Multiprocessing & Thread Safety
-# ---------------------------------------------------------------------------
 
 
 def derive_seed(base_seed: int, identifier: Any) -> int:
@@ -557,11 +486,7 @@ def _parallel_worker_shim(func: Callable[[Any], Any], item: Any, blas_threads: i
 
 
 def run_parallel(
-    func: Callable[[Any], Any],
-    tasks: Sequence[Any],
-    n_jobs: int = 1,
-    blas_threads: int = 1,
-    backend: str = "loky",
+    func: Callable[[Any], Any], tasks: Sequence[Any], n_jobs: int = 1, blas_threads: int = 1, backend: str = "loky"
 ) -> List[Any]:
     """Execute target-wise tasks in parallel with thread safety and exception propagation.
 
@@ -585,40 +510,26 @@ def run_parallel(
     """
     if len(tasks) == 0:
         return []
-
     if n_jobs <= 1 or len(tasks) == 1:
         with limit_blas_threads(blas_threads):
             return [func(task) for task in tasks]
-
     try:
         import joblib
 
         engine = "loky" if backend in ("process", "multiprocessing", "loky") else backend
-
-        results = joblib.Parallel(
-            n_jobs=n_jobs,
-            backend=engine,
-            return_as="list",
-        )(
-            joblib.delayed(_parallel_worker_shim)(func, task, blas_threads)
-            for task in tasks
+        results = joblib.Parallel(n_jobs=n_jobs, backend=engine, return_as="list")(
+            joblib.delayed(_parallel_worker_shim)(func, task, blas_threads) for task in tasks
         )
         return results
-
     except Exception as exc:
         logger.warning(
-            "Parallel execution with backend %r encountered error (%s); "
-            "falling back to serial execution.",
-            backend,
-            exc,
+            "Parallel execution with backend %r encountered error (%s); falling back to serial execution.", backend, exc
         )
         with limit_blas_threads(blas_threads):
             return [func(task) for task in tasks]
 
 
-# ---------------------------------------------------------------------------
 # Compute Profiler & Benchmarking
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -656,11 +567,7 @@ class ComputeProfiler:
                 n_jobs=n_jobs,
                 elapsed_seconds=round(elapsed_seconds, 2),
                 peak_rss_mb=round(peak_rss_mb, 1),
-                gpu_peak_memory_mb=(
-                    round(gpu_peak_memory_mb, 1)
-                    if gpu_peak_memory_mb is not None
-                    else None
-                ),
+                gpu_peak_memory_mb=(round(gpu_peak_memory_mb, 1) if gpu_peak_memory_mb is not None else None),
             )
         )
 
@@ -668,14 +575,7 @@ class ComputeProfiler:
         """Return profiling records as a DataFrame."""
         if not self.profiles:
             return pd.DataFrame(
-                columns=[
-                    "stage",
-                    "backend",
-                    "n_jobs",
-                    "elapsed_seconds",
-                    "peak_rss_mb",
-                    "gpu_peak_memory_mb",
-                ]
+                columns=["stage", "backend", "n_jobs", "elapsed_seconds", "peak_rss_mb", "gpu_peak_memory_mb"]
             )
         return pd.DataFrame([vars(p) for p in self.profiles])
 
@@ -702,15 +602,13 @@ def stage_profile(
     b_name = decision.backend if decision else backend
     w_count = decision.n_jobs if decision else n_jobs
     dev = decision.device if decision else device
-
     try:
         import psutil
+
         process = psutil.Process(os.getpid())
     except Exception:
         process = None
-
     yield
-
     elapsed = time.time() - start_time
     rss_mb = 0.0
     if process is not None:
@@ -718,16 +616,15 @@ def stage_profile(
             rss_mb = process.memory_info().rss / (1024.0 * 1024.0)
         except Exception:
             pass
-
     gpu_peak_mb = None
     if b_name.lower() == "gpu":
         try:
             import torch
+
             if torch.cuda.is_available():
                 gpu_peak_mb = torch.cuda.max_memory_allocated(dev) / (1024.0 * 1024.0)
         except Exception:
             pass
-
     if profiler is not None:
         profiler.record(
             stage=stage,

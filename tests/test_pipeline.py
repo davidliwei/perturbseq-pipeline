@@ -31,9 +31,7 @@ from perturbseq_pipeline.guides import (  # noqa: E402
 )
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
@@ -70,9 +68,7 @@ def mtx_run(synthetic, tmp_path_factory):
     return run_pipeline(_base_config(synthetic, outdir))
 
 
-# ---------------------------------------------------------------------------
 # Config
-# ---------------------------------------------------------------------------
 
 
 def test_config_rejects_unknown_keys():
@@ -87,10 +83,7 @@ def test_config_requires_an_input():
 
 def test_config_rejects_primary_control_outside_controls():
     cfg = Config.from_dict(
-        {
-            "input": {"h5ad": "x.h5ad"},
-            "perturbation": {"controls": ["other"], "primary_control": "ntc"},
-        }
+        {"input": {"h5ad": "x.h5ad"}, "perturbation": {"controls": ["other"], "primary_control": "ntc"}}
     )
     with pytest.raises(ValueError, match="primary_control"):
         cfg.validate()
@@ -103,9 +96,7 @@ def test_config_yaml_roundtrip(tmp_path):
     assert Config.from_yaml(path).guides.min_umi == 7
 
 
-# ---------------------------------------------------------------------------
 # Guide calling
-# ---------------------------------------------------------------------------
 
 
 def test_target_parsing_handles_both_library_conventions():
@@ -116,12 +107,7 @@ def test_target_parsing_handles_both_library_conventions():
 
 def test_ntc_detection():
     g = GuideConfig()
-    assert list(is_non_targeting(["non", "NTC", "AFF4", "scramble"], g)) == [
-        True,
-        True,
-        False,
-        True,
-    ]
+    assert list(is_non_targeting(["non", "NTC", "AFF4", "scramble"], g)) == [True, True, False, True]
 
 
 def test_target_regex_override():
@@ -150,7 +136,6 @@ def test_multiplet_gate_rejects_codominant_cells():
     assert not call(1000, 100), "deep doublet must be rejected despite the ratio"
     assert call(1000, 10), "runner-up at the cap is still allowed"
     assert not call(1000, 11), "one above the cap is not"
-
     off = GuideConfig(min_umi=3, dominance_ratio=2.0, max_second_umi=-1)
     assert off.max_second_umi < 0, "-1 disables the gate"
 
@@ -166,17 +151,13 @@ def test_multiplet_gate_applies_in_the_pipeline(synthetic, tmp_path):
     loose = _base_config(synthetic, tmp_path / "run_loose")
     loose.ps_score.enabled = False
     loose.lochness.enabled = False
-    n_loose = (
-        run_pipeline(loose).adata.obs["perturbation_class"].astype(str) == "targeting"
-    ).sum()
-
+    n_loose = (run_pipeline(loose).adata.obs["perturbation_class"].astype(str) == "targeting").sum()
     strict = _base_config(synthetic, tmp_path / "run_strict")
     strict.guides.max_second_umi = 1
     strict.ps_score.enabled = False
     strict.lochness.enabled = False
     result = run_pipeline(strict)
     n_strict = (result.adata.obs["perturbation_class"].astype(str) == "targeting").sum()
-
     assert n_strict < n_loose, "the gate must remove co-dominant cells"
     # Rejected cells become ambiguous, not deleted.
     assert (result.adata.obs["perturbation_class"].astype(str) == "ambiguous").sum() > 0
@@ -199,9 +180,7 @@ def test_top_two_handles_all_zero_rows():
     assert np.all(top == 0) and np.all(second == 0)
 
 
-# ---------------------------------------------------------------------------
 # End-to-end: 10x MTX mode
-# ---------------------------------------------------------------------------
 
 
 def test_mtx_run_produces_all_deliverables(mtx_run):
@@ -240,9 +219,7 @@ def test_both_control_arms_are_reported(mtx_run):
         assert f"is_hit_{control}" in cols
 
 
-# ---------------------------------------------------------------------------
 # cluster.assigned_only
-# ---------------------------------------------------------------------------
 
 
 def test_assigned_only_is_off_by_default():
@@ -263,36 +240,29 @@ def test_assigned_only_analyses_singlets_only(assigned_only_run, mtx_run):
 
     adata = sc.read_h5ad(assigned_only_run.h5ad)
     klass = adata.obs["perturbation_class"].astype(str)
-
     assert set(klass) <= {"targeting", "non-targeting"}
     assert adata.n_obs == assigned_only_run.n_cells
     # The synthetic data must actually contain multiplets for this to mean anything.
     assert adata.n_obs < sc.read_h5ad(mtx_run.h5ad).n_obs
-
     # Every analysed cell is fully embedded and clustered — no NaN padding.
     assert not adata.obs["leiden"].isna().any()
     assert np.isfinite(np.asarray(adata.obsm["X_umap"])).all()
 
 
-def test_assigned_only_writes_an_all_cells_h5ad_with_ambiguous_cells(
-    assigned_only_run, mtx_run
-):
+def test_assigned_only_writes_an_all_cells_h5ad_with_ambiguous_cells(assigned_only_run, mtx_run):
     """The pre-filter object keeps every cell, so ambiguous cells stay visible."""
     import scanpy as sc
 
     assert assigned_only_run.unfiltered_h5ad is not None
     allc = sc.read_h5ad(assigned_only_run.unfiltered_h5ad)
-
     # Same cells as a default (unfiltered) run, ambiguous ones included.
     assert allc.n_obs == sc.read_h5ad(mtx_run.h5ad).n_obs
     assert {"ambiguous", "unassigned"} & set(allc.obs["perturbation_class"].astype(str))
-
     # It carries its own complete embedding — every cell has real coordinates,
     # and the neighbor graph its uns refers to is actually present.
     assert not allc.obs["leiden"].isna().any()
     assert np.isfinite(np.asarray(allc.obsm["X_umap"])).all()
     assert allc.uns["neighbors"]["connectivities_key"] in allc.obsp
-
     x = allc.X.toarray() if sp.issparse(allc.X) else np.asarray(allc.X)
     ln = allc.layers["lognorm"]
     ln = ln.toarray() if sp.issparse(ln) else np.asarray(ln)
@@ -344,27 +314,22 @@ def test_results_archive_bundles_everything_except_matrices(mtx_run):
     assert mtx_run.archive is not None and mtx_run.archive.is_file()
     with tarfile.open(mtx_run.archive, "r:gz") as tar:
         names = tar.getnames()
-
     assert not any(n.endswith(".h5ad") for n in names), "h5ad must be excluded"
     assert not any(n.endswith(".tar.gz") for n in names), "archive must not nest itself"
-
     tails = {n.split("/", 1)[-1] for n in names}
     assert "report.html" in tails
     assert any(t.startswith("figures/") and t.endswith(".png") for t in tails)
     assert any(t.startswith("tables/") and t.endswith(".csv") for t in tails)
     assert "logs/run.log" in tails
-
     # Everything unpacks under a single directory named for the run.
     roots = {n.split("/", 1)[0] for n in names}
     assert roots == {"test"}, roots
-
     # Completeness: every file in the run directory that is not excluded must
     # be in the archive — "all files except the matrices", with nothing lost.
     on_disk = {
         str(p.relative_to(mtx_run.outdir))
         for p in mtx_run.outdir.rglob("*")
-        if p.is_file()
-        and not p.name.endswith((".h5ad", ".h5", ".loom", ".tar.gz"))
+        if p.is_file() and not p.name.endswith((".h5ad", ".h5", ".loom", ".tar.gz"))
     }
     assert on_disk - tails == set(), f"missing from archive: {sorted(on_disk - tails)}"
 
@@ -381,14 +346,12 @@ def test_archive_can_be_disabled(synthetic, tmp_path):
 
 def test_archive_exclude_patterns_are_honoured(synthetic, tmp_path):
     import tarfile
-
     from perturbseq_pipeline.cli import run_pipeline
 
     cfg = _base_config(synthetic, tmp_path / "run_excl")
     cfg.output.archive_name = "custom_bundle.tar.gz"
     cfg.output.archive_exclude = ["*.h5ad", "*.tar.gz", "*.png"]
     result = run_pipeline(cfg)
-
     assert result.archive.name == "custom_bundle.tar.gz"
     with tarfile.open(result.archive, "r:gz") as tar:
         names = tar.getnames()
@@ -402,9 +365,7 @@ def test_report_is_self_contained(mtx_run):
     assert "data:image/png;base64" in html, "figures should be embedded"
 
 
-# ---------------------------------------------------------------------------
 # Sample metadata rules
-# ---------------------------------------------------------------------------
 
 
 def test_multilane_without_metadata_is_rejected(synthetic, tmp_path):
@@ -418,7 +379,6 @@ def test_multilane_without_metadata_is_rejected(synthetic, tmp_path):
 
 def test_metadata_missing_a_lane_is_rejected(synthetic, tmp_path):
     import pandas as pd
-
     from perturbseq_pipeline.cli import run_pipeline
 
     meta = pd.read_csv(synthetic["metadata"]).iloc[:1]
@@ -430,22 +390,18 @@ def test_metadata_missing_a_lane_is_rejected(synthetic, tmp_path):
         run_pipeline(cfg)
 
 
-# ---------------------------------------------------------------------------
 # End-to-end: the three h5ad layouts
-# ---------------------------------------------------------------------------
 
 
 def test_h5ad_mode_with_guide_features_in_var(synthetic, tmp_path):
     """Layout 1: one h5ad holding both gene-expression and guide features."""
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     combined = sc.read_10x_mtx(synthetic["lanes"]["L1"], gex_only=False, cache=False)
     combined.var_names_make_unique()
     path = tmp_path / "combined.h5ad"
     combined.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_var")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -473,17 +429,13 @@ def test_h5ad_mode_with_companion_guide_file(mtx_run, synthetic, tmp_path):
 def test_h5ad_mode_with_precomputed_obs_labels(mtx_run, synthetic, tmp_path):
     """Layout 3: no guide matrix, only a per-cell genotype column."""
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     adata = sc.read_h5ad(mtx_run.h5ad)
     # Mimic the Seurat export convention: TARGET-SUFFIX.N
-    adata.obs["genotype"] = [
-        f"{t}-P1P2.1" for t in adata.obs["target_gene"].astype(str)
-    ]
+    adata.obs["genotype"] = [f"{t}-P1P2.1" for t in adata.obs["target_gene"].astype(str)]
     path = tmp_path / "with_genotype.h5ad"
     adata.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_obs")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -497,14 +449,12 @@ def test_h5ad_mode_with_precomputed_obs_labels(mtx_run, synthetic, tmp_path):
 
 def test_h5ad_without_any_guide_information_gives_a_clear_error(synthetic, tmp_path):
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     adata = sc.read_10x_mtx(synthetic["lanes"]["L1"], gex_only=True, cache=False)
     adata.var_names_make_unique()
     path = tmp_path / "no_guides.h5ad"
     adata.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_noguide")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -523,14 +473,12 @@ def test_harmony_returns_a_correctly_shaped_embedding():
     """
     pytest.importorskip("harmonypy")
     import anndata as ad
-
     from perturbseq_pipeline.cluster import _run_harmony
 
     rng = np.random.default_rng(0)
     adata = ad.AnnData(X=rng.normal(size=(300, 20)).astype("float32"))
     adata.obs["lane_id"] = pd.Categorical(["L1"] * 150 + ["L2"] * 150)
     adata.obsm["X_pca"] = rng.normal(size=(300, 15))
-
     cfg = Config()
     cfg.cluster.batch_key = "lane_id"
     key = _run_harmony(adata, cfg)
@@ -541,7 +489,6 @@ def test_harmony_returns_a_correctly_shaped_embedding():
 def test_harmony_is_skipped_for_a_single_batch():
     pytest.importorskip("harmonypy")
     import anndata as ad
-
     from perturbseq_pipeline.cluster import _run_harmony
 
     adata = ad.AnnData(X=np.zeros((10, 5), dtype="float32"))
@@ -551,9 +498,7 @@ def test_harmony_is_skipped_for_a_single_batch():
     assert _run_harmony(adata, cfg) is None
 
 
-# ---------------------------------------------------------------------------
 # Cluster enrichment
-# ---------------------------------------------------------------------------
 
 
 def test_enrichment_outputs_are_produced(mtx_run):
@@ -656,12 +601,7 @@ def test_guide_concordance_follows_the_observed_direction():
     depletions as 0 guides agreeing — the opposite of the truth.
     """
     from perturbseq_pipeline.enrichment import _guide_concordance
-    from perturbseq_pipeline.guides import (
-        CLASS_TARGETING,
-        OBS_CLASS,
-        OBS_GUIDE,
-        OBS_TARGET,
-    )
+    from perturbseq_pipeline.guides import CLASS_TARGETING, OBS_CLASS, OBS_GUIDE, OBS_TARGET
 
     # Three guides for GENE, none of whose cells land in cluster "9",
     # against a reference that puts 20% of its cells there.
@@ -673,14 +613,9 @@ def test_guide_concordance_follows_the_observed_direction():
             "leiden": ["1"] * 30,
         }
     )
-    conc, tested = _guide_concordance(
-        obs, "GENE", "9", "leiden", ref_fraction=0.20, min_cells=5, direction="depleted"
-    )
+    conc, tested = _guide_concordance(obs, "GENE", "9", "leiden", ref_fraction=0.20, min_cells=5, direction="depleted")
     assert (conc, tested) == (3, 3), "all three guides support the depletion"
-
-    conc, tested = _guide_concordance(
-        obs, "GENE", "9", "leiden", ref_fraction=0.20, min_cells=5, direction="enriched"
-    )
+    conc, tested = _guide_concordance(obs, "GENE", "9", "leiden", ref_fraction=0.20, min_cells=5, direction="enriched")
     assert (conc, tested) == (0, 3), "none support an enrichment"
 
 
@@ -694,11 +629,7 @@ def test_omnibus_tolerates_empty_rows_and_columns():
     """
     from perturbseq_pipeline.enrichment import omnibus_test
 
-    tbl = pd.DataFrame(
-        [[50, 0, 10], [5, 0, 40], [0, 0, 0]],
-        index=["A", "B", "C"],
-        columns=["c1", "c2", "c3"],
-    )
+    tbl = pd.DataFrame([[50, 0, 10], [5, 0, 40], [0, 0, 0]], index=["A", "B", "C"], columns=["c1", "c2", "c3"])
     res = omnibus_test(tbl, n_permutations=100, seed=0)
     assert res, "should return a result rather than raising"
     assert np.isfinite(res["chi2"])
@@ -719,16 +650,13 @@ def test_omnibus_detects_association_and_null():
     assoc = pd.DataFrame([[100, 1], [1, 100]], index=["A", "B"], columns=["c1", "c2"])
     res = omnibus_test(assoc, n_permutations=200, seed=0)
     assert res["p_permutation"] < 0.05
-
     # No association: identical profiles.
     null = pd.DataFrame([[50, 50], [50, 50]], index=["A", "B"], columns=["c1", "c2"])
     res_null = omnibus_test(null, n_permutations=200, seed=0)
     assert res_null["p_permutation"] > 0.05
 
 
-# ---------------------------------------------------------------------------
 # Per-cell perturbation scores (pertps / PS_python)
-# ---------------------------------------------------------------------------
 
 pertps_required = pytest.mark.skipif(
     not __import__("perturbseq_pipeline.ps_score", fromlist=["x"]).pertps_available(),
@@ -740,20 +668,11 @@ pertps_required = pytest.mark.skipif(
 def test_ps_scores_are_produced(mtx_run):
     summary = pd.read_csv(mtx_run.outdir / "tables" / "ps_score.csv")
     assert len(summary) > 0
-    for col in (
-        "target_gene",
-        "n_perturbed_cells",
-        "mean_ps",
-        "pct_successful_kd",
-        "pct_escaper",
-    ):
+    for col in ("target_gene", "n_perturbed_cells", "mean_ps", "pct_successful_kd", "pct_escaper"):
         assert col in summary.columns
     # Quadrant fractions describe a partition, so they must sum to 100%.
     total = (
-        summary["pct_successful_kd"]
-        + summary["pct_escaper"]
-        + summary["pct_non_responder"]
-        + summary["pct_low_signal"]
+        summary["pct_successful_kd"] + summary["pct_escaper"] + summary["pct_non_responder"] + summary["pct_low_signal"]
     )
     assert np.allclose(total, 100.0, atol=0.01), total.tolist()
 
@@ -803,11 +722,8 @@ def test_expression_cut_methods_are_selectable():
     cfg.ps_score.expression_cut = "quantile"
     cfg.ps_score.expression_cut_quantile = 0.75
     assert _expression_cut(ref, cfg.ps_score) == pytest.approx(1.0)
-
     with pytest.raises(ValueError, match="expression_cut"):
-        bad = Config.from_dict(
-            {"input": {"h5ad": "x"}, "ps_score": {"expression_cut": "nonsense"}}
-        )
+        bad = Config.from_dict({"input": {"h5ad": "x"}, "ps_score": {"expression_cut": "nonsense"}})
         bad.validate()
 
 
@@ -823,7 +739,6 @@ def test_lda_embedding_is_built_and_plotted(mtx_run):
     # Cells outside the trained classes (ambiguous/unassigned) get no
     # coordinates by design, so this must not be all cells.
     assert "lda_label" in adata.obs.columns
-
     summary = pd.read_csv(mtx_run.outdir / "tables" / "ps_score.csv")
     lda_figs = list((mtx_run.figures_dir / "ps_score" / "lda").glob("*.png"))
     assert len(lda_figs) == len(summary), "one LDA figure per scored target"
@@ -858,7 +773,6 @@ def test_ps_skips_targets_not_expressed_in_controls(synthetic, tmp_path):
     as a successful knockdown.
     """
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     combined = sc.read_10x_mtx(synthetic["lanes"]["L1"], gex_only=False, cache=False)
@@ -870,14 +784,12 @@ def test_ps_skips_targets_not_expressed_in_controls(synthetic, tmp_path):
     combined.X = X.tocsr()
     path = tmp_path / "silent_ps.h5ad"
     combined.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_ps_silent")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
     cfg.metadata.file = None
     cfg.qc.min_cells_per_gene = 0
     result = run_pipeline(cfg)
-
     summary_path = result.outdir / "tables" / "ps_score.csv"
     if summary_path.is_file():
         summary = pd.read_csv(summary_path)
@@ -910,9 +822,7 @@ def test_missing_pertps_can_be_made_fatal(synthetic, tmp_path, monkeypatch):
         run_pipeline(cfg)
 
 
-# ---------------------------------------------------------------------------
 # Guides merged into the processed h5ad
-# ---------------------------------------------------------------------------
 
 
 def test_guides_are_merged_into_the_processed_h5ad(mtx_run):
@@ -922,7 +832,6 @@ def test_guides_are_merged_into_the_processed_h5ad(mtx_run):
     adata = sc.read_h5ad(mtx_run.h5ad)
     assert "guide_counts" in adata.obsm, "guide matrix missing from the h5ad"
     assert "guide_names" in adata.uns
-
     guides = adata.obsm["guide_counts"]
     assert sp.issparse(guides), "must stay sparse; dense would be far larger"
     assert guides.shape[0] == adata.n_obs, "one row per cell"
@@ -931,7 +840,6 @@ def test_guides_are_merged_into_the_processed_h5ad(mtx_run):
     # with the gene expression.
     data = guides.data[:200]
     assert np.allclose(data, np.round(data)), "guide counts must stay integers"
-
     # By default the separate file is no longer written.
     assert mtx_run.guide_h5ad is None
 
@@ -948,7 +856,6 @@ def test_merged_h5ad_round_trips_through_the_reader(mtx_run, synthetic, tmp_path
     cfg.ps_score.enabled = False
     cfg.lochness.enabled = False
     result = run_pipeline(cfg)
-
     # Guides were recovered from obsm, so assignments reproduce.
     original = mtx_run.adata.obs["target_gene"].astype(str)
     reloaded = result.adata.obs["target_gene"].astype(str)
@@ -969,9 +876,7 @@ def test_separate_guide_h5ad_can_still_be_written(synthetic, tmp_path):
     assert result.guide_h5ad is not None and result.guide_h5ad.is_file()
 
 
-# ---------------------------------------------------------------------------
 # Separate GEX / guide quantifications (STARsolo layout)
-# ---------------------------------------------------------------------------
 
 
 def test_separate_gex_and_guide_directories(tmp_path):
@@ -981,7 +886,6 @@ def test_separate_gex_and_guide_directories(tmp_path):
     cells, so the loader must subset and align rather than fail or mis-order.
     """
     from make_synthetic import make_split_lane
-
     from perturbseq_pipeline.cli import run_pipeline
 
     lanes = {}
@@ -990,10 +894,8 @@ def test_separate_gex_and_guide_directories(tmp_path):
         paths = make_split_lane(tmp_path / "split", lane, n_cells=300, seed=i)
         lanes[lane] = paths["gex"]
         guide_dirs[lane] = paths["guides"]
-
     meta = tmp_path / "meta.csv"
     pd.DataFrame({"lane_id": list(lanes), "sample": ["S1", "S2"]}).to_csv(meta, index=False)
-
     cfg = Config.from_dict(
         {
             "run": {"name": "split", "outdir": str(tmp_path / "run_split")},
@@ -1008,11 +910,9 @@ def test_separate_gex_and_guide_directories(tmp_path):
     )
     cfg.validate()
     result = run_pipeline(cfg)
-
     # The whitelist-only barcodes must not leak into the analysis.
     assert result.n_cells <= 600
     assert not any(str(n).startswith("WHITELIST") for n in result.adata.obs_names)
-
     # Guides aligned correctly, so the planted knockdowns are still recovered.
     tbl = result.perturbation_table.set_index("target_gene")
     for gene in KD_TARGETS:
@@ -1023,9 +923,7 @@ def test_separate_gex_and_guide_directories(tmp_path):
 
 
 def test_guide_mtx_dirs_must_cover_every_lane():
-    cfg = Config.from_dict(
-        {"input": {"mtx_dirs": {"L1": "/a", "L2": "/b"}, "guide_mtx_dirs": {"L1": "/g"}}}
-    )
+    cfg = Config.from_dict({"input": {"mtx_dirs": {"L1": "/a", "L2": "/b"}, "guide_mtx_dirs": {"L1": "/g"}}})
     with pytest.raises(ValueError, match="must cover every lane"):
         cfg.validate()
 
@@ -1038,30 +936,22 @@ def test_target_regex_handles_gene_desert_controls():
     a target called "gene".
     """
     g = GuideConfig(target_regex=r"^(.+)_\d+$")
-    got = list(
-        parse_target_genes(
-            ["ADGRV1_1", "gene_desert_3", "non-targeting_20", "AK9_2"], g
-        )
-    )
+    got = list(parse_target_genes(["ADGRV1_1", "gene_desert_3", "non-targeting_20", "AK9_2"], g))
     assert got == ["ADGRV1", "gene_desert", "non-targeting", "AK9"]
 
 
-# ---------------------------------------------------------------------------
 # Barcode -> guide table input (the PS_python demo layout)
-# ---------------------------------------------------------------------------
 
 
 def test_guide_table_input_resolves_multiplets_by_count(synthetic, tmp_path):
     """A cell listed twice must follow the dominance rule, not row order."""
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     adata = sc.read_10x_mtx(synthetic["lanes"]["L1"], gex_only=True, cache=False)
     adata.var_names_make_unique()
     path = tmp_path / "expr_only.h5ad"
     adata.write_h5ad(path)
-
     # Every cell gets a dominant guide, plus a decoy row listed afterwards with
     # a much lower count. Taking "the last row wins" would pick the decoy.
     barcodes = list(adata.obs_names)
@@ -1072,7 +962,6 @@ def test_guide_table_input_resolves_multiplets_by_count(synthetic, tmp_path):
         rows.append({"cell": bc, "gene": "DECOY", "umi_count": 1})
     table = tmp_path / "barcodes.txt"
     pd.DataFrame(rows).to_csv(table, sep="\t", index=False)
-
     cfg = _base_config(synthetic, tmp_path / "run_guide_table")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -1082,7 +971,6 @@ def test_guide_table_input_resolves_multiplets_by_count(synthetic, tmp_path):
     cfg.input.guide_table_strip_prefix = False
     cfg.metadata.file = None
     result = run_pipeline(cfg)
-
     targets = set(result.adata.obs["target_gene"].astype(str))
     assert "DECOY" not in targets, "the low-count decoy must never win"
     assert set(KD_TARGETS) <= targets
@@ -1098,9 +986,7 @@ def test_guide_table_is_written_and_matches_the_matrix(mtx_run):
     table = pd.read_csv(table_path, sep="\t")
     for col in ("cell", "barcode", "sgrna", "gene", "umi_count", "assignment"):
         assert col in table.columns, f"missing column {col}"
-
     assert table["umi_count"].min() >= 3, "entries below the threshold must be dropped"
-
     merged = sc.read_h5ad(mtx_run.h5ad)
     X = merged.obsm["guide_counts"]
     dense = X.toarray() if sp.issparse(X) else np.asarray(X)
@@ -1126,13 +1012,11 @@ def test_guide_table_round_trips_through_the_reader(mtx_run, synthetic, tmp_path
     included — on the same per-cell calls.
     """
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     table_path = next(mtx_run.outdir.glob("*_guide_barcodes.txt"))
     expr = sc.read_h5ad(mtx_run.h5ad)
     original = expr.obs["target_gene"].astype(str)
-
     # Feed the written table back in as the sole source of guide identity.
     plain = expr.copy()
     for key in list(plain.obs.columns):
@@ -1140,7 +1024,6 @@ def test_guide_table_round_trips_through_the_reader(mtx_run, synthetic, tmp_path
             del plain.obs[key]
     path = tmp_path / "expr_for_roundtrip.h5ad"
     plain.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_roundtrip")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -1149,7 +1032,6 @@ def test_guide_table_round_trips_through_the_reader(mtx_run, synthetic, tmp_path
     cfg.metadata.file = None
     cfg.ps_score.enabled = False
     result = run_pipeline(cfg)
-
     reloaded = result.adata.obs["target_gene"].astype(str)
     shared = original.index.intersection(reloaded.index)
     agree = (original.loc[shared] == reloaded.loc[shared]).mean()
@@ -1162,13 +1044,8 @@ def test_guide_table_strips_library_prefixes(tmp_path):
 
     table = tmp_path / "bc.tsv"
     pd.DataFrame(
-        {
-            "cell": ["S1L1_AAAC-1", "S2L2_CCCC-1"],
-            "gene": ["GENEA", "Non-Targeting"],
-            "umi_count": [30, 30],
-        }
+        {"cell": ["S1L1_AAAC-1", "S2L2_CCCC-1"], "gene": ["GENEA", "Non-Targeting"], "umi_count": [30, 30]}
     ).to_csv(table, sep="\t", index=False)
-
     cfg = Config.from_dict({"input": {"h5ad": "x", "guide_table": str(table)}})
     labels = read_guide_table(cfg, pd.Index(["AAAC-1", "CCCC-1", "TTTT-1"]))
     assert list(labels) == ["GENEA", "Non-Targeting", "unassigned"]
@@ -1179,17 +1056,13 @@ def test_guide_table_unmatched_barcodes_raise_a_clear_error(tmp_path):
     from perturbseq_pipeline.io import read_guide_table
 
     table = tmp_path / "bc.tsv"
-    pd.DataFrame(
-        {"cell": ["WRONG-1"], "gene": ["GENEA"], "umi_count": [30]}
-    ).to_csv(table, sep="\t", index=False)
+    pd.DataFrame({"cell": ["WRONG-1"], "gene": ["GENEA"], "umi_count": [30]}).to_csv(table, sep="\t", index=False)
     cfg = Config.from_dict({"input": {"h5ad": "x", "guide_table": str(table)}})
     with pytest.raises(ValueError, match="No barcode"):
         read_guide_table(cfg, pd.Index(["AAAC-1"]))
 
 
-# ---------------------------------------------------------------------------
 # lochNESS
-# ---------------------------------------------------------------------------
 
 
 def _reference_lochness(adata, target_genotype, n_neighbors, nn_name="nn"):
@@ -1220,9 +1093,7 @@ def lochness_toy():
     rng = np.random.default_rng(0)
     n, k = 400, 30
     a = ad.AnnData(X=rng.normal(size=(n, 30)).astype("float32"))
-    a.obs["genotype"] = pd.Categorical(
-        rng.choice(["G1", "G2", "G3", "NT"], size=n, p=[0.3, 0.25, 0.2, 0.25])
-    )
+    a.obs["genotype"] = pd.Categorical(rng.choice(["G1", "G2", "G3", "NT"], size=n, p=[0.3, 0.25, 0.2, 0.25]))
     sc.pp.pca(a, n_comps=10)
     sc.pp.neighbors(a, n_neighbors=k, n_pcs=10, key_added="nn")
     return a, k
@@ -1236,7 +1107,6 @@ def test_lochness_matches_the_perttf_reference(lochness_toy):
     adj, counts = _adjacency(sp.csr_matrix(a.obsp["nn_distances"]))
     overall = a.obs["genotype"].value_counts(normalize=True).to_dict()
     labels = a.obs["genotype"].astype(str).to_numpy()
-
     for gene in ("G1", "G2", "G3", "NT"):
         ref = _reference_lochness(a, gene, n_neighbors=k)
         ours = lochness_score(adj, counts, (labels == gene).astype(float), overall[gene])
@@ -1306,19 +1176,12 @@ def test_lochness_colour_scale_does_not_clip_the_tail():
 def test_lochness_end_to_end_outputs(mtx_run):
     summary = pd.read_csv(mtx_run.outdir / "tables" / "lochness.csv")
     assert len(summary) > 0
-    for col in (
-        "target_gene",
-        "mean_lochness_in_own_cells",
-        "pct_cells_enriched",
-        "max_lochness",
-    ):
+    for col in ("target_gene", "mean_lochness_in_own_cells", "pct_cells_enriched", "max_lochness"):
         assert col in summary.columns
-
     maps = list((mtx_run.figures_dir / "lochness" / "per_target").glob("*.png"))
     assert len(maps) == len(summary), "one map per scored perturbation"
     overview = {p.stem for p in (mtx_run.figures_dir / "lochness").glob("*.png")}
     assert {"lochness_self_enrichment", "lochness_distributions"} <= overview
-
     obs = mtx_run.adata.obs
     assert "lochness_self" in obs.columns
     assert any(c.startswith("lochness_") and c != "lochness_self" for c in obs.columns)
@@ -1335,9 +1198,7 @@ def test_lochness_can_be_disabled(synthetic, tmp_path):
     assert result.report.is_file()
 
 
-# ---------------------------------------------------------------------------
 # Co-functional modules & gene programs
-# ---------------------------------------------------------------------------
 
 
 def test_modules_outputs_are_produced(mtx_run):
@@ -1347,7 +1208,6 @@ def test_modules_outputs_are_produced(mtx_run):
     programs = pd.read_csv(td / "gene_programs.csv")
     modules = pd.read_csv(td / "cofunctional_modules.csv")
     strength = pd.read_csv(td / "module_program_strength.csv")
-
     # Effect matrix is perturbation x gene (plus the target_gene index column).
     assert effect.shape[0] == modules.shape[0]
     assert effect.shape[1] - 1 == programs.shape[0]
@@ -1355,12 +1215,10 @@ def test_modules_outputs_are_produced(mtx_run):
     assert {"gene", "program"} <= set(programs.columns)
     # module x program strength: one row per module, one column per program (+ label).
     assert strength.shape[0] == modules["module"].nunique()
-
     figs = {p.stem for p in (mtx_run.figures_dir / "modules").glob("*.png")}
     assert "regulome_heatmap" in figs
     assert "module_program_strength" in figs
     assert "module_program_alluvial" in figs
-
     # Per-cell program scores landed in obs.
     score_cols = [c for c in mtx_run.adata.obs.columns if c.startswith("program_")]
     assert score_cols, "expected per-cell program score columns in obs"
@@ -1377,9 +1235,7 @@ def test_modules_can_be_disabled(synthetic, tmp_path):
     assert result.report.is_file()
 
 
-# ---------------------------------------------------------------------------
 # Statistics
-# ---------------------------------------------------------------------------
 
 
 def test_benjamini_hochberg_matches_statsmodels():
@@ -1402,7 +1258,6 @@ def test_unexpressed_targets_are_reported_untestable_not_scored(synthetic, tmp_p
     reported as untestable instead.
     """
     import scanpy as sc
-
     from perturbseq_pipeline.cli import run_pipeline
 
     combined = sc.read_10x_mtx(synthetic["lanes"]["L1"], gex_only=False, cache=False)
@@ -1415,7 +1270,6 @@ def test_unexpressed_targets_are_reported_untestable_not_scored(synthetic, tmp_p
     combined.X = X.tocsr()
     path = tmp_path / "silent.h5ad"
     combined.write_h5ad(path)
-
     cfg = _base_config(synthetic, tmp_path / "run_silent")
     cfg.input.mtx_dirs = None
     cfg.input.h5ad = str(path)
@@ -1424,7 +1278,6 @@ def test_unexpressed_targets_are_reported_untestable_not_scored(synthetic, tmp_p
     # catches it, rather than the earlier min-cells-per-gene filter.
     cfg.qc.min_cells_per_gene = 0
     result = run_pipeline(cfg)
-
     tested = set(result.perturbation_table["target_gene"])
     assert silent not in tested, f"{silent} is unexpressed and must not be scored"
     skipped = pd.read_csv(result.outdir / "tables" / "skipped.csv")
@@ -1468,9 +1321,7 @@ def test_all_cells_checkpoint_is_written_before_qc_for_default_runs(mtx_run, syn
 
     assert mtx_run.unfiltered_h5ad is not None and Path(mtx_run.unfiltered_h5ad).is_file()
     allc = ad.read_h5ad(mtx_run.unfiltered_h5ad)
-    n_input = sum(
-        len(pd.read_csv(Path(p) / "barcodes.tsv.gz", header=None)) for p in synthetic["lanes"].values()
-    )
+    n_input = sum(len(pd.read_csv(Path(p) / "barcodes.tsv.gz", header=None)) for p in synthetic["lanes"].values())
     assert allc.n_obs == n_input
     assert allc.n_obs >= mtx_run.n_cells
     for col in ("total_counts", "n_genes_by_counts", "pct_counts_mt", "lane_id"):

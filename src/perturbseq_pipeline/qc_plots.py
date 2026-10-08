@@ -58,15 +58,17 @@ def _subsample(n: int, seed: int = 0, max_points: int = MAX_SCATTER_POINTS) -> n
 
 
 def _log_hist(ax, values: np.ndarray, color: str, label: str, bins: np.ndarray, alpha: float = 0.85):
-    ax.hist(values, bins=bins, color=color, alpha=alpha, label=label, histtype="stepfilled", linewidth=0.8, edgecolor=color)
+    ax.hist(
+        values, bins=bins, color=color, alpha=alpha, label=label, histtype="stepfilled", linewidth=0.8, edgecolor=color
+    )
 
 
-# ---------------------------------------------------------------------------
 # Expression QC per sample
-# ---------------------------------------------------------------------------
 
 
-def plot_sample_expression_qc(obs: pd.DataFrame, thresholds: Dict[str, object], sample_id: str, reg: FigureRegistry) -> None:
+def plot_sample_expression_qc(
+    obs: pd.DataFrame, thresholds: Dict[str, object], sample_id: str, reg: FigureRegistry
+) -> None:
     """Histograms of the four core metrics with the resolved thresholds drawn."""
     metrics = [
         ("total_counts", "Total UMI counts", True, ("min_counts", "max_counts")),
@@ -100,10 +102,13 @@ def plot_sample_expression_qc(obs: pd.DataFrame, thresholds: Dict[str, object], 
         ax.legend(fontsize=7, frameon=False)
     fig.suptitle(f"{sample_id}: expression QC metrics (n = {len(obs):,} cells; nothing removed)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, f"{sample_id}_qc_metrics", SECTION_QC_SAMPLES,
-             f"{sample_id} — QC metric distributions",
-             "Dashed lines show the resolved per-sample thresholds; predicted doublets are overlaid, not removed.")
-
+    reg.save(
+        fig,
+        f"{sample_id}_qc_metrics",
+        SECTION_QC_SAMPLES,
+        f"{sample_id} — QC metric distributions",
+        "Dashed lines show the resolved per-sample thresholds; predicted doublets are overlaid, not removed.",
+    )
     # counts vs genes / counts vs mt scatter
     idx = _subsample(len(obs))
     fig, axes = plt.subplots(1, 2, figsize=(9, 4))
@@ -113,9 +118,27 @@ def plot_sample_expression_qc(obs: pd.DataFrame, thresholds: Dict[str, object], 
             continue
         y = obs[ycol].to_numpy(dtype=float)[idx]
         sub_dbl = dbl[idx] if dbl is not None else np.zeros(len(idx), dtype=bool)
-        ax.scatter(x[~sub_dbl], y[~sub_dbl], s=3, alpha=0.35, color=C_ALL, linewidths=0, label="singlet / unscored", rasterized=True)
+        ax.scatter(
+            x[~sub_dbl],
+            y[~sub_dbl],
+            s=3,
+            alpha=0.35,
+            color=C_ALL,
+            linewidths=0,
+            label="singlet / unscored",
+            rasterized=True,
+        )
         if sub_dbl.any():
-            ax.scatter(x[sub_dbl], y[sub_dbl], s=4, alpha=0.6, color=C_DOUBLET, linewidths=0, label="predicted doublet", rasterized=True)
+            ax.scatter(
+                x[sub_dbl],
+                y[sub_dbl],
+                s=4,
+                alpha=0.6,
+                color=C_DOUBLET,
+                linewidths=0,
+                label="predicted doublet",
+                rasterized=True,
+            )
         ax.set_xscale("log")
         if ycol == "n_genes_by_counts":
             ax.set_yscale("log")
@@ -137,13 +160,16 @@ def plot_sample_expression_qc(obs: pd.DataFrame, thresholds: Dict[str, object], 
         ax.legend(fontsize=7, frameon=False, markerscale=3)
     fig.suptitle(f"{sample_id}: counts vs genes / counts vs mt ({len(idx):,} of {len(obs):,} cells shown)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, f"{sample_id}_qc_scatter", SECTION_QC_SAMPLES, f"{sample_id} — counts vs genes and mt%",
-             "Dashed lines: resolved thresholds. Orange: Scrublet predicted doublets (retained).")
+    reg.save(
+        fig,
+        f"{sample_id}_qc_scatter",
+        SECTION_QC_SAMPLES,
+        f"{sample_id} — counts vs genes and mt%",
+        "Dashed lines: resolved thresholds. Orange: Scrublet predicted doublets (retained).",
+    )
 
 
-# ---------------------------------------------------------------------------
 # Doublets
-# ---------------------------------------------------------------------------
 
 
 def plot_doublet_scores(obs: pd.DataFrame, sample_id: str, threshold: Optional[float], reg: FigureRegistry) -> None:
@@ -181,8 +207,13 @@ def plot_doublet_scores(obs: pd.DataFrame, sample_id: str, threshold: Optional[f
         ax.legend(fontsize=7, frameon=False)
     fig.suptitle(f"{sample_id}: Scrublet scores (annotation only; no cells removed)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, f"{sample_id}_doublet_scores", SECTION_DOUBLETS, f"{sample_id} — Scrublet doublet scores",
-             "Left: all cells with the automatic threshold. Right: split by the guide-derived multiplet flag.")
+    reg.save(
+        fig,
+        f"{sample_id}_doublet_scores",
+        SECTION_DOUBLETS,
+        f"{sample_id} — Scrublet doublet scores",
+        "Left: all cells with the automatic threshold. Right: split by the guide-derived multiplet flag.",
+    )
 
 
 def plot_scrublet_vs_guide(obs: pd.DataFrame, label: str, reg: FigureRegistry) -> None:
@@ -191,10 +222,12 @@ def plot_scrublet_vs_guide(obs: pd.DataFrame, label: str, reg: FigureRegistry) -
     pred = obs["predicted_doublet"].astype(bool).to_numpy()
     gm = obs["guide_multiplet_flag"].astype(bool).to_numpy()
     det = obs["guide_detected"].astype(bool).to_numpy() if "guide_detected" in obs else np.ones(len(obs), bool)
-    table = np.array([
-        [int((~pred & ~gm & det).sum()), int((~pred & gm).sum()), int((~pred & ~det).sum())],
-        [int((pred & ~gm & det).sum()), int((pred & gm).sum()), int((pred & ~det).sum())],
-    ])
+    table = np.array(
+        [
+            [int((~pred & ~gm & det).sum()), int((~pred & gm).sum()), int((~pred & ~det).sum())],
+            [int((pred & ~gm & det).sum()), int((pred & gm).sum()), int((pred & ~det).sum())],
+        ]
+    )
     fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8), gridspec_kw={"width_ratios": [1.1, 1]})
     ax = axes[0]
     im = ax.imshow(table, cmap="Blues", aspect="auto")
@@ -205,8 +238,15 @@ def plot_scrublet_vs_guide(obs: pd.DataFrame, label: str, reg: FigureRegistry) -
     total = table.sum() or 1
     for i in range(2):
         for j in range(3):
-            ax.text(j, i, f"{table[i, j]:,}\n({100 * table[i, j] / total:.1f}%)", ha="center", va="center",
-                    fontsize=8, color="white" if table[i, j] > table.max() / 2 else "#0b0b0b")
+            ax.text(
+                j,
+                i,
+                f"{table[i, j]:,}\n({100 * table[i, j] / total:.1f}%)",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="white" if table[i, j] > table.max() / 2 else "#0b0b0b",
+            )
     ax.set_title("Scrublet call vs guide multiplet flag", fontsize=9)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -214,14 +254,22 @@ def plot_scrublet_vs_guide(obs: pd.DataFrame, label: str, reg: FigureRegistry) -
     if "doublet_score" in obs:
         score = pd.to_numeric(obs["doublet_score"], errors="coerce").to_numpy(dtype=float)
         ok = np.isfinite(score)
-        groups = [("guide clean", score[ok & ~gm & det], C_CLEAN), ("guide multiplet", score[ok & gm], C_MULTIPLET),
-                  ("no guide", score[ok & ~det], "#52514e")]
+        groups = [
+            ("guide clean", score[ok & ~gm & det], C_CLEAN),
+            ("guide multiplet", score[ok & gm], C_MULTIPLET),
+            ("no guide", score[ok & ~det], "#52514e"),
+        ]
         groups = [g for g in groups if g[1].size]
     else:
         groups = []
     if groups:
-        parts = ax.boxplot([g[1] for g in groups], tick_labels=[f"{g[0]}\n(n={g[1].size:,})" for g in groups],
-                           showfliers=False, patch_artist=True, widths=0.55)
+        parts = ax.boxplot(
+            [g[1] for g in groups],
+            tick_labels=[f"{g[0]}\n(n={g[1].size:,})" for g in groups],
+            showfliers=False,
+            patch_artist=True,
+            widths=0.55,
+        )
         for patch, g in zip(parts["boxes"], groups):
             patch.set_facecolor(g[2])
             patch.set_alpha(0.75)
@@ -232,13 +280,16 @@ def plot_scrublet_vs_guide(obs: pd.DataFrame, label: str, reg: FigureRegistry) -
         ax.set_axis_off()
     fig.suptitle(f"{label}: Scrublet vs guide-derived multiplets (assessment only)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, f"{label}_scrublet_vs_guide_multiplet", SECTION_DOUBLETS,
-             f"{label} — Scrublet vs guide multiplet", "Both indicators are stored as flags; no cell was removed.")
+    reg.save(
+        fig,
+        f"{label}_scrublet_vs_guide_multiplet",
+        SECTION_DOUBLETS,
+        f"{label} — Scrublet vs guide multiplet",
+        "Both indicators are stored as flags; no cell was removed.",
+    )
 
 
-# ---------------------------------------------------------------------------
 # Guides
-# ---------------------------------------------------------------------------
 
 
 def plot_guide_qc(obs: pd.DataFrame, sample_id: str, classes: Sequence[str], reg: FigureRegistry) -> None:
@@ -287,18 +338,44 @@ def plot_guide_qc(obs: pd.DataFrame, sample_id: str, classes: Sequence[str], reg
             _bar(ax, col, f"Scaffold {c} guides per cell")
     fig.suptitle(f"{sample_id}: guide QC (n = {len(obs):,} cells)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, f"{sample_id}_guide_qc", SECTION_GUIDES, f"{sample_id} — guide UMIs and guides per cell",
-             "Detected = UMIs at or above the detection threshold. Predicted doublets are stacked, not removed.")
-
+    reg.save(
+        fig,
+        f"{sample_id}_guide_qc",
+        SECTION_GUIDES,
+        f"{sample_id} — guide UMIs and guides per cell",
+        "Detected = UMIs at or above the detection threshold. Predicted doublets are stacked, not removed.",
+    )
     if "total_counts" in obs and (v > 0).any():
         idx = _subsample(len(obs))
         fig, ax = plt.subplots(figsize=(4.8, 4))
-        gm = obs["guide_multiplet_flag"].astype(bool).to_numpy()[idx] if "guide_multiplet_flag" in obs else np.zeros(len(idx), bool)
+        gm = (
+            obs["guide_multiplet_flag"].astype(bool).to_numpy()[idx]
+            if "guide_multiplet_flag" in obs
+            else np.zeros(len(idx), bool)
+        )
         x = obs["total_counts"].to_numpy(dtype=float)[idx]
         y = v[idx]
-        ax.scatter(x[~gm], y[~gm] + 1, s=3, alpha=0.35, color=C_CLEAN, linewidths=0, label="guide clean / none", rasterized=True)
+        ax.scatter(
+            x[~gm],
+            y[~gm] + 1,
+            s=3,
+            alpha=0.35,
+            color=C_CLEAN,
+            linewidths=0,
+            label="guide clean / none",
+            rasterized=True,
+        )
         if gm.any():
-            ax.scatter(x[gm], y[gm] + 1, s=4, alpha=0.6, color=C_MULTIPLET, linewidths=0, label="guide multiplet", rasterized=True)
+            ax.scatter(
+                x[gm],
+                y[gm] + 1,
+                s=4,
+                alpha=0.6,
+                color=C_MULTIPLET,
+                linewidths=0,
+                label="guide multiplet",
+                rasterized=True,
+            )
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlabel("Total GEX UMI counts")
@@ -307,8 +384,13 @@ def plot_guide_qc(obs: pd.DataFrame, sample_id: str, classes: Sequence[str], reg
         ax.legend(fontsize=7, frameon=False, markerscale=3)
         fig.suptitle(f"{sample_id}: guide UMIs vs GEX UMIs", fontsize=10)
         fig.tight_layout()
-        reg.save(fig, f"{sample_id}_guide_vs_gex_umis", SECTION_GUIDES, f"{sample_id} — guide vs GEX UMIs",
-                 "Guide multiplet flags shown in violet; retained in every output.")
+        reg.save(
+            fig,
+            f"{sample_id}_guide_vs_gex_umis",
+            SECTION_GUIDES,
+            f"{sample_id} — guide vs GEX UMIs",
+            "Guide multiplet flags shown in violet; retained in every output.",
+        )
 
 
 def plot_guide_representation(design: pd.DataFrame, umis_by_sample: Dict[str, np.ndarray], reg: FigureRegistry) -> None:
@@ -319,7 +401,13 @@ def plot_guide_representation(design: pd.DataFrame, umis_by_sample: Dict[str, np
     n = len(design)
     for i, (sid, umis) in enumerate(umis_by_sample.items()):
         order = np.argsort(-umis)
-        ax.plot(np.arange(n), np.sort(umis)[::-1] + 1, color=CATEGORICAL[i % len(CATEGORICAL)], linewidth=1.6, label=f"{sid} ({int((umis > 0).sum())}/{n} observed)")
+        ax.plot(
+            np.arange(n),
+            np.sort(umis)[::-1] + 1,
+            color=CATEGORICAL[i % len(CATEGORICAL)],
+            linewidth=1.6,
+            label=f"{sid} ({int((umis > 0).sum())}/{n} observed)",
+        )
     ax.set_yscale("log")
     ax.set_xlabel("Designed guides, ranked by UMI count")
     ax.set_ylabel("Guide UMIs in cells + 1")
@@ -327,13 +415,16 @@ def plot_guide_representation(design: pd.DataFrame, umis_by_sample: Dict[str, np
     ax.legend(fontsize=7, frameon=False)
     fig.suptitle("Guide representation per sample (all designed guides)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, "guide_representation", SECTION_GUIDES, "Guide representation",
-             "Every designed guide is a column of the count matrix; zero-count guides sit at 1 on this axis.")
+    reg.save(
+        fig,
+        "guide_representation",
+        SECTION_GUIDES,
+        "Guide representation",
+        "Every designed guide is a column of the count matrix; zero-count guides sit at 1 on this axis.",
+    )
 
 
-# ---------------------------------------------------------------------------
 # Combined
-# ---------------------------------------------------------------------------
 
 
 def plot_combined_metrics(obs: pd.DataFrame, reg: FigureRegistry, sample_key: str = "sample_id") -> None:
@@ -355,23 +446,47 @@ def plot_combined_metrics(obs: pd.DataFrame, reg: FigureRegistry, sample_key: st
         _style(ax)
     fig.suptitle(f"Combined QC metrics by sample (n = {len(obs):,} cells, all retained)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, "combined_qc_metrics_by_sample", SECTION_QC, "Combined QC metrics by sample",
-             "Per-sample distributions on the all-cells object; medians marked.")
+    reg.save(
+        fig,
+        "combined_qc_metrics_by_sample",
+        SECTION_QC,
+        "Combined QC metrics by sample",
+        "Per-sample distributions on the all-cells object; medians marked.",
+    )
 
 
 def plot_sample_flag_summary(summary: pd.DataFrame, reg: FigureRegistry) -> None:
     """Grouped bars: fraction of cells per sample carrying each flag."""
-    cols = [c for c in ("frac_gex_qc_pass", "frac_predicted_doublet", "frac_guide_detected", "frac_guide_multiplet_flag") if c in summary]
+    cols = [
+        c
+        for c in ("frac_gex_qc_pass", "frac_predicted_doublet", "frac_guide_detected", "frac_guide_multiplet_flag")
+        if c in summary
+    ]
     if not cols or summary.empty:
         return
-    labels = {"frac_gex_qc_pass": "expression QC pass", "frac_predicted_doublet": "Scrublet flagged",
-              "frac_guide_detected": "guide detected", "frac_guide_multiplet_flag": "guide multiplet flagged"}
-    colors = {"frac_gex_qc_pass": C_ALL, "frac_predicted_doublet": C_DOUBLET, "frac_guide_detected": C_CLEAN, "frac_guide_multiplet_flag": C_MULTIPLET}
+    labels = {
+        "frac_gex_qc_pass": "expression QC pass",
+        "frac_predicted_doublet": "Scrublet flagged",
+        "frac_guide_detected": "guide detected",
+        "frac_guide_multiplet_flag": "guide multiplet flagged",
+    }
+    colors = {
+        "frac_gex_qc_pass": C_ALL,
+        "frac_predicted_doublet": C_DOUBLET,
+        "frac_guide_detected": C_CLEAN,
+        "frac_guide_multiplet_flag": C_MULTIPLET,
+    }
     fig, ax = plt.subplots(figsize=(1.6 * len(summary) + 3, 3.6))
     x = np.arange(len(summary))
     w = 0.8 / len(cols)
     for i, c in enumerate(cols):
-        ax.bar(x + (i - (len(cols) - 1) / 2) * w, summary[c].to_numpy(dtype=float), width=w * 0.92, color=colors[c], label=labels[c])
+        ax.bar(
+            x + (i - (len(cols) - 1) / 2) * w,
+            summary[c].to_numpy(dtype=float),
+            width=w * 0.92,
+            color=colors[c],
+            label=labels[c],
+        )
     ax.set_xticks(x)
     ax.set_xticklabels(summary["sample_id"].astype(str), fontsize=8)
     ax.set_ylabel("fraction of input cells")
@@ -380,8 +495,13 @@ def plot_sample_flag_summary(summary: pd.DataFrame, reg: FigureRegistry) -> None
     ax.legend(fontsize=7, frameon=False, ncol=2)
     fig.suptitle("Per-sample QC flag fractions (flags only — no cells removed)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, "sample_flag_summary", SECTION_QC, "Per-sample flag summary",
-             "Scrublet flagged and guide multiplet flagged are annotations, not removals.")
+    reg.save(
+        fig,
+        "sample_flag_summary",
+        SECTION_QC,
+        "Per-sample flag summary",
+        "Scrublet flagged and guide multiplet flagged are annotations, not removals.",
+    )
 
 
 def plot_guide_detection_sensitivity(table: pd.DataFrame, reg: FigureRegistry) -> None:
@@ -391,16 +511,35 @@ def plot_guide_detection_sensitivity(table: pd.DataFrame, reg: FigureRegistry) -
     samples = list(pd.unique(table["sample_id"].astype(str)))
     fracs = sorted(table["min_fraction_of_top"].unique())
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), sharex=True)
-    for ax, col, ylabel in zip(axes, ("frac_guide_structure_pass", "frac_guide_multiplet_flag"),
-                               ("fraction structure_pass", "fraction guide_multiplet_flag")):
+    for ax, col, ylabel in zip(
+        axes,
+        ("frac_guide_structure_pass", "frac_guide_multiplet_flag"),
+        ("fraction structure_pass", "fraction guide_multiplet_flag"),
+    ):
         for i, frac in enumerate(fracs):
             sub = table[table["min_fraction_of_top"] == frac]
             mean = sub.groupby("detection_threshold_umi")[col].mean()
-            ax.plot(mean.index, mean.to_numpy(), marker="o", markersize=4, linewidth=1.6,
-                    color=CATEGORICAL[i % len(CATEGORICAL)], label=f"min fraction of top = {frac:g}")
+            ax.plot(
+                mean.index,
+                mean.to_numpy(),
+                marker="o",
+                markersize=4,
+                linewidth=1.6,
+                color=CATEGORICAL[i % len(CATEGORICAL)],
+                label=f"min fraction of top = {frac:g}",
+            )
         cur = table[table["is_current_rule"]]
         if len(cur):
-            ax.scatter(cur["detection_threshold_umi"], cur[col], s=70, facecolors="none", edgecolors=C_FAIL, linewidths=1.5, label="configured rule", zorder=5)
+            ax.scatter(
+                cur["detection_threshold_umi"],
+                cur[col],
+                s=70,
+                facecolors="none",
+                edgecolors=C_FAIL,
+                linewidths=1.5,
+                label="configured rule",
+                zorder=5,
+            )
         ax.set_xscale("log")
         ax.set_xlabel("absolute detection threshold (UMIs)")
         ax.set_ylabel(ylabel)
@@ -409,12 +548,19 @@ def plot_guide_detection_sensitivity(table: pd.DataFrame, reg: FigureRegistry) -
     axes[0].legend(fontsize=7, frameon=False)
     fig.suptitle(f"Guide detection-rule sensitivity (mean over {len(samples)} sample(s))", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, "guide_detection_sensitivity", SECTION_GUIDES, "Guide detection-rule sensitivity",
-             "How the structure-pass and multiplet fractions move with the detection rule. Assessment only; "
-             "the stored flags use the configured rule (red circle).")
+    reg.save(
+        fig,
+        "guide_detection_sensitivity",
+        SECTION_GUIDES,
+        "Guide detection-rule sensitivity",
+        "How the structure-pass and multiplet fractions move with the detection rule. Assessment only; "
+        "the stored flags use the configured rule (red circle).",
+    )
 
 
-def plot_doublet_score_by_sample(obs: pd.DataFrame, doublet_rows: Sequence[Dict[str, object]], reg: FigureRegistry, sample_key: str = "sample_id") -> None:
+def plot_doublet_score_by_sample(
+    obs: pd.DataFrame, doublet_rows: Sequence[Dict[str, object]], reg: FigureRegistry, sample_key: str = "sample_id"
+) -> None:
     """Scrublet score distributions per sample with each automatic threshold."""
     if "doublet_score" not in obs:
         return
@@ -424,7 +570,9 @@ def plot_doublet_score_by_sample(obs: pd.DataFrame, doublet_rows: Sequence[Dict[
     fig, axes = plt.subplots(1, len(samples), figsize=(3.6 * len(samples), 3.4), sharey=False)
     axes = np.atleast_1d(axes)
     for ax, s in zip(axes, samples):
-        score = pd.to_numeric(obs.loc[obs[sample_key].astype(str) == s, "doublet_score"], errors="coerce").to_numpy(dtype=float)
+        score = pd.to_numeric(obs.loc[obs[sample_key].astype(str) == s, "doublet_score"], errors="coerce").to_numpy(
+            dtype=float
+        )
         score = score[np.isfinite(score)]
         if not score.size:
             ax.set_axis_off()
@@ -433,8 +581,13 @@ def plot_doublet_score_by_sample(obs: pd.DataFrame, doublet_rows: Sequence[Dict[
         _log_hist(ax, score, C_ALL, "cells", bins)
         thr = thr_of.get(s)
         if thr is not None and np.isfinite(float(thr)):
-            ax.axvline(float(thr), color=C_FAIL, linestyle="--", linewidth=1.2,
-                       label=f"auto threshold {float(thr):.2f}" + (" (suspect)" if suspect.get(s) else ""))
+            ax.axvline(
+                float(thr),
+                color=C_FAIL,
+                linestyle="--",
+                linewidth=1.2,
+                label=f"auto threshold {float(thr):.2f}" + (" (suspect)" if suspect.get(s) else ""),
+            )
         ax.set_yscale("log")
         ax.set_title(s, fontsize=9)
         ax.set_xlabel("Scrublet doublet score")
@@ -442,5 +595,10 @@ def plot_doublet_score_by_sample(obs: pd.DataFrame, doublet_rows: Sequence[Dict[
         ax.legend(fontsize=7, frameon=False)
     fig.suptitle("Scrublet score distributions per sample (annotation only)", fontsize=10)
     fig.tight_layout()
-    reg.save(fig, "doublet_scores_by_sample", SECTION_DOUBLETS, "Scrublet scores by sample",
-             "Automatic thresholds marked; 'suspect' means the threshold sits beyond the observed score range or calls <0.5% of cells.")
+    reg.save(
+        fig,
+        "doublet_scores_by_sample",
+        SECTION_DOUBLETS,
+        "Scrublet scores by sample",
+        "Automatic thresholds marked; 'suspect' means the threshold sits beyond the observed score range or calls <0.5% of cells.",
+    )

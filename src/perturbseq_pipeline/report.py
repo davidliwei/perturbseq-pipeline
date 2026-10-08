@@ -84,10 +84,7 @@ def _df_to_html(df: Optional[pd.DataFrame], max_rows: int = 200) -> str:
     shown = df.head(max_rows)
     html = shown.to_html(index=False, escape=True, border=0, na_rep="")
     if len(df) > max_rows:
-        html += (
-            f'<p class="sub">Showing {max_rows} of {len(df)} rows; '
-            "the full table is in <code>tables/</code>.</p>"
-        )
+        html += f'<p class="sub">Showing {max_rows} of {len(df)} rows; the full table is in <code>tables/</code>.</p>'
     return Markup(html)
 
 
@@ -117,13 +114,8 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
     reg = inputs.registry
     res = inputs.perturbation
     embed = cfg.report.embed_figures
-
-    env = Environment(
-        loader=FileSystemLoader(str(TEMPLATE_DIR)),
-        autoescape=select_autoescape(["html"]),
-    )
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=select_autoescape(["html"]))
     template = env.get_template("report.html")
-
     figures = {
         "qc": reg.by_section(SECTION_QC),
         "guides": reg.by_section(SECTION_GUIDES),
@@ -145,7 +137,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
     enrich_extras = reg.extras(SECTION_ENRICH_PER_TARGET)
     distance_extras = reg.extras(SECTION_DISTANCE)
     distance_space_extras = reg.extras(SECTION_DISTANCE_SPACE)
-
     tables_html = {
         key: _df_to_html(inputs.tables.get(key), cfg.report.max_table_rows)
         for key in (
@@ -180,14 +171,11 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
     }
     tables_html["module_status"] = _df_to_html(inputs.module_status, 50)
     tables_html["outputs"] = _df_to_html(
-        pd.DataFrame(
-            [{"deliverable": k, "path": v} for k, v in inputs.outputs.items()]
-        )
+        pd.DataFrame([{"deliverable": k, "path": v} for k, v in inputs.outputs.items()])
     )
     # ``skipped`` drives a conditional heading, so it must be falsy when empty.
     if inputs.tables.get("skipped") is None or len(inputs.tables.get("skipped", [])) == 0:
         tables_html["skipped"] = ""
-
     # --- enrichment context ------------------------------------------------
     enr = inputs.enrichment
     enrichment_ctx = None
@@ -200,9 +188,7 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "n_clusters": int(enr.composition.shape[1]),
             "n_tests": int(enr.composition.shape[0] * enr.composition.shape[1]),
             "control_label": CONTROL_LABELS[enr.primary_control],
-            "controls_described": " and ".join(
-                CONTROL_LABELS[c] for c in enr.controls_used
-            ),
+            "controls_described": " and ".join(CONTROL_LABELS[c] for c in enr.controls_used),
             "chi2": f"{om.get('chi2', float('nan')):.0f}",
             "dof": om.get("dof", 0),
             "p_perm": f"{om.get('p_permutation', float('nan')):.3g}",
@@ -210,29 +196,21 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "stratified": enr.stratified,
             "stratify_by": enr.stratify_by,
             "n_low_power": int(enr.table["low_power"].sum()),
-            "top_shift": (
-                enr.effect_magnitude.iloc[0].to_dict()
-                if len(enr.effect_magnitude)
-                else {}
-            ),
+            "top_shift": (enr.effect_magnitude.iloc[0].to_dict() if len(enr.effect_magnitude) else {}),
         }
-
     mods = inputs.modules
     modules_ctx = None
     if mods is not None and not mods.effect_matrix.empty:
         top_hub = mods.hubs.iloc[0].to_dict() if not mods.hubs.empty else {}
-
         # Program biological annotations & pathways
         prog_annotations = getattr(mods, "program_annotations", {})
         display_labels = getattr(mods, "program_display_labels", {})
         enr_df = getattr(mods, "program_enrichment", None)
-
         program_details = []
         for p in mods.program_labels:
             p_genes = mods.program_genes.get(p, [])
             ann = prog_annotations.get(p, "unannotated")
             disp = display_labels.get(p, p)
-
             top_pathways = []
             if enr_df is not None and not enr_df.empty and "program_id" in enr_df.columns:
                 p_enr = enr_df[enr_df["program_id"] == p].sort_values(["fdr", "p_value"]).head(5)
@@ -254,7 +232,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
                             "overlap_genes": r.get("overlap_genes", ""),
                         }
                     )
-
             program_details.append(
                 {
                     "program_id": p,
@@ -265,7 +242,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
                     "top_pathways": top_pathways,
                 }
             )
-
         # Module-program biological interpretations
         mp_mat = getattr(mods, "module_program", None)
         module_details = []
@@ -284,7 +260,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
                             neg_progs.append((disp, float(val)))
                 pos_progs.sort(key=lambda x: -x[1])
                 neg_progs.sort(key=lambda x: x[1])
-
             module_details.append(
                 {
                     "module_id": m,
@@ -294,9 +269,7 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
                     "negative_programs": neg_progs[:3],
                 }
             )
-
         has_enrichment = bool(enr_df is not None and not enr_df.empty)
-
         modules_ctx = {
             "n_modules": mods.n_modules,
             "n_programs": mods.n_programs,
@@ -310,9 +283,7 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "top_hub": top_hub.get("target_gene", ""),
             "top_hub_n": int(top_hub.get("n_de_genes", 0)),
             "n_tf_edges": int(len(mods.tf_edges)),
-            "program_genes": {
-                p: mods.program_genes.get(p, [])[:10] for p in mods.program_labels
-            },
+            "program_genes": {p: mods.program_genes.get(p, [])[:10] for p in mods.program_labels},
             "program_annotations": prog_annotations,
             "program_display_labels": display_labels,
             "programs": program_details,
@@ -320,7 +291,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "has_enrichment": has_enrichment,
         }
     modules_extras = reg.extras(SECTION_MODULES)
-
     ps = inputs.ps
     ps_ctx = None
     if ps is not None and not ps.summary.empty:
@@ -342,7 +312,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
     ps_note = ps.note if ps is not None and ps.note else ""
     ps_extras = reg.extras(SECTION_PS_PER_TARGET)
     ps_lda_extras = reg.extras(SECTION_PS_LDA)
-
     loch = inputs.lochness
     loch_ctx = None
     if loch is not None and not loch.summary.empty:
@@ -357,7 +326,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "genotype_key": cfg.lochness.genotype_key,
         }
     loch_extras = reg.extras(SECTION_LOCHNESS_PER_TARGET)
-
     dist = inputs.distance
     distance_ctx = None
     if dist is not None and not dist.table.empty:
@@ -372,32 +340,27 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
             "top_target": dist.table.iloc[0]["target_gene"] if len(dist.table) > 0 else "",
             "top_distance": f"{dist.table.iloc[0]['energy_distance']:.3f}" if len(dist.table) > 0 else "",
         }
-
     dist_space = inputs.distance_space
     distance_space_ctx = None
     if dist_space is not None and not dist_space.distance_matrix.empty:
         distance_space_ctx = {
             "n_targets": int(len(dist_space.distance_matrix)),
             "n_components": dist_space.n_components,
-            "n_modules": int(dist_space.phenotype_modules["phenotype_module"].nunique()) if not dist_space.phenotype_modules.empty else 0,
+            "n_modules": int(dist_space.phenotype_modules["phenotype_module"].nunique())
+            if not dist_space.phenotype_modules.empty
+            else 0,
             "metric": dist_space.metric,
             "linkage": dist_space.linkage_method,
         }
-
     controls_described = " and ".join(CONTROL_LABELS[c] for c in res.controls_used)
     primary_fallback = res.primary_control != cfg.perturbation.primary_control
-
     n_hits = len(res.hits) if not res.table.empty else 0
     perturbation_cards = [
         ("Targets tested", f"{len(res.table):,}"),
         ("Effective knockdowns", f"{n_hits:,}"),
-        (
-            "Control cells",
-            f"{res.n_control_cells.get(res.primary_control, 0):,}",
-        ),
+        ("Control cells", f"{res.n_control_cells.get(res.primary_control, 0):,}"),
         ("Targets not testable", f"{len(res.skipped):,}"),
     ]
-
     html = template.render(
         title=cfg.report.title,
         run_name=cfg.run.name,
@@ -427,39 +390,27 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
         ps_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in ps_extras],
         ps_per_target_dir=str(reg.figdir / SECTION_PS_PER_TARGET),
         ps_lda_extras=ps_lda_extras,
-        ps_lda_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in ps_lda_extras
-        ],
+        ps_lda_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in ps_lda_extras],
         ps_lda_dir=str(reg.figdir / SECTION_PS_LDA),
         lochness=loch_ctx,
         lochness_extras=loch_extras,
-        lochness_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in loch_extras
-        ],
+        lochness_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in loch_extras],
         lochness_dir=str(reg.figdir / SECTION_LOCHNESS_PER_TARGET),
         modules=modules_ctx,
         modules_extras=modules_extras,
-        modules_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in modules_extras
-        ],
+        modules_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in modules_extras],
         modules_dir=str(reg.figdir / SECTION_MODULES),
         distance=distance_ctx,
         distance_extras=distance_extras,
-        distance_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in distance_extras
-        ],
+        distance_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in distance_extras],
         distance_dir=str(reg.figdir / SECTION_DISTANCE),
         distance_space=distance_space_ctx,
         distance_space_extras=distance_space_extras,
-        distance_space_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in distance_space_extras
-        ],
+        distance_space_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in distance_space_extras],
         distance_space_dir=str(reg.figdir / SECTION_DISTANCE_SPACE),
         enrichment=enrichment_ctx,
         enrichment_extras=enrich_extras,
-        enrichment_extra_names=[
-            f"{r.name}.{cfg.report.figure_format}" for r in enrich_extras
-        ],
+        enrichment_extra_names=[f"{r.name}.{cfg.report.figure_format}" for r in enrich_extras],
         enrichment_per_gene_dir=str(reg.figdir / SECTION_ENRICH_PER_TARGET),
         per_gene_dir=str(reg.figdir / SECTION_PER_GENE),
         n_figures=len(reg.records),
@@ -467,7 +418,6 @@ def build_report(inputs: ReportInputs, path: Path) -> Path:
         versions=_versions(),
         provenance_rows=inputs.provenance_rows,
     )
-
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")
@@ -490,9 +440,7 @@ def _config_yaml(cfg: Config) -> str:
     return yaml.safe_dump(cfg.to_dict(), sort_keys=False, default_flow_style=False)
 
 
-# ---------------------------------------------------------------------------
 # Basic QC stage report
-# ---------------------------------------------------------------------------
 
 
 def build_qc_report(
@@ -508,7 +456,6 @@ def build_qc_report(
 ) -> Path:
     """Render the QC-only HTML report (no perturbation results required)."""
     import datetime as _dt
-
     from . import __version__
     from .qc_plots import SECTION_DOUBLETS, SECTION_QC_SAMPLES
 

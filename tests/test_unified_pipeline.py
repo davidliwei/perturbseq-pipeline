@@ -85,9 +85,7 @@ def distance_run(synthetic, tmp_path_factory):
     return run_pipeline(_config(synthetic, outdir, **overrides))
 
 
-# ---------------------------------------------------------------------------
 # Run manifest and module status
-# ---------------------------------------------------------------------------
 
 
 def test_run_manifest_is_written_with_required_fields(minimal_run):
@@ -143,7 +141,13 @@ def test_report_shows_module_status_and_provenance(minimal_run):
     assert "Git branch / commit" in html
     assert "disabled" in html
     # optional sections are absent when their module is off
-    for anchor in ('<h2 id="distance">', '<h2 id="distance_space">', '<h2 id="lochness">', '<h2 id="modules">', '<h2 id="enrichment">'):
+    for anchor in (
+        '<h2 id="distance">',
+        '<h2 id="distance_space">',
+        '<h2 id="lochness">',
+        '<h2 id="modules">',
+        '<h2 id="enrichment">',
+    ):
         assert anchor not in html, anchor
     md = Path(minimal_run.outdir) / "report.md"
     assert md.is_file() and "Module completion status" in md.read_text()
@@ -151,7 +155,15 @@ def test_report_shows_module_status_and_provenance(minimal_run):
 
 def test_disabled_modules_write_no_tables(minimal_run):
     tabledir = Path(minimal_run.outdir) / "tables"
-    for name in ("perturbation_distance", "phenotype_modules", "lochness", "ps_score", "cofunctional_modules", "enrichment", "perturbation_meta"):
+    for name in (
+        "perturbation_distance",
+        "phenotype_modules",
+        "lochness",
+        "ps_score",
+        "cofunctional_modules",
+        "enrichment",
+        "perturbation_meta",
+    ):
         assert not (tabledir / f"{name}.csv").exists(), name
     for name in ("qc_steps", "guide_assignment", "clusters", "perturbation", "module_status"):
         assert (tabledir / f"{name}.csv").is_file(), name
@@ -168,9 +180,7 @@ def test_tracker_marks_not_run_stages():
     assert status["report"] == "not_run"
 
 
-# ---------------------------------------------------------------------------
 # Optional modules consume the standardized labels
-# ---------------------------------------------------------------------------
 
 
 def test_distance_stages_run_when_enabled(distance_run):
@@ -222,7 +232,9 @@ def test_pair_mode_rejects_label_only_input(minimal_run, tmp_path):
     from perturbseq_pipeline.io import write_h5ad
 
     src = minimal_run.adata
-    labelled = ad.AnnData(X=src.layers["counts"].copy(), obs=src.obs[["lane_id", "target_gene"]].copy(), var=src.var[[]].copy())
+    labelled = ad.AnnData(
+        X=src.layers["counts"].copy(), obs=src.obs[["lane_id", "target_gene"]].copy(), var=src.var[[]].copy()
+    )
     h5 = write_h5ad(labelled, tmp_path / "labelled.h5ad")
     cfg = Config.from_dict(
         {
@@ -239,9 +251,7 @@ def test_pair_mode_rejects_label_only_input(minimal_run, tmp_path):
         run_pipeline(cfg)
 
 
-# ---------------------------------------------------------------------------
 # HDF5-safe names
-# ---------------------------------------------------------------------------
 
 
 def test_write_h5ad_sanitises_unsafe_names(tmp_path):
@@ -250,7 +260,6 @@ def test_write_h5ad_sanitises_unsafe_names(tmp_path):
     assert sanitize_h5ad_name("LIPA (rs1412444)") == "LIPA__rs1412444_"
     assert sanitize_h5ad_name("A/B") == "A_B"
     assert sanitize_h5ad_name("plain_name.1") == "plain_name.1"
-
     X = sp.random(20, 5, density=0.5, format="csr", random_state=0)
     adata = ad.AnnData(X=X)
     adata.obs["lochness_LIPA (rs1412444)"] = np.arange(20, dtype=float)
@@ -266,7 +275,12 @@ def test_write_h5ad_sanitises_unsafe_names(tmp_path):
     assert "per_target_summary" in back.uns
     assert "X_bad_name" in back.obsm
     mapping = back.uns["column_name_mapping"]
-    assert set(map(str, mapping["original"])) >= {"lochness_LIPA (rs1412444)", "ps_score_FHL3/alt", "per target/summary", "X_bad name"}
+    assert set(map(str, mapping["original"])) >= {
+        "lochness_LIPA (rs1412444)",
+        "ps_score_FHL3/alt",
+        "per target/summary",
+        "X_bad name",
+    }
     csv = tmp_path / "safe_column_name_mapping.csv"
     assert csv.is_file()
     df = pd.read_csv(csv)
@@ -283,9 +297,7 @@ def test_write_h5ad_without_unsafe_names_writes_no_mapping(tmp_path):
     assert "column_name_mapping" not in ad.read_h5ad(tmp_path / "plain.h5ad").uns
 
 
-# ---------------------------------------------------------------------------
 # Shipped configuration compatibility
-# ---------------------------------------------------------------------------
 
 
 def test_default_yaml_matches_schema():
@@ -307,7 +319,11 @@ def test_demo_config_still_loads_and_validates(tmp_path):
     cfg.validate()
 
 
-@pytest.mark.parametrize("name", sorted(p.name for p in (REPO / "config").glob("*.yaml")) + sorted(str(p.relative_to(REPO / "config")) for p in (REPO / "config" / "examples").glob("*.yaml")))
+@pytest.mark.parametrize(
+    "name",
+    sorted(p.name for p in (REPO / "config").glob("*.yaml"))
+    + sorted(str(p.relative_to(REPO / "config")) for p in (REPO / "config" / "examples").glob("*.yaml")),
+)
 def test_every_shipped_config_parses(name):
     import yaml
 
@@ -325,8 +341,18 @@ def test_input_mode_switches_are_accepted():
 
 
 def test_paired_guide_config_keys_are_accepted():
-    cfg = Config.from_dict({"guides": {"assignment_mode": "dual_guide_pair", "pair_assignment_primary": True}, "input": {"mtx_dirs": {"L1": "/x"}, "guide_mtx_dirs": {"L1": "/g"}}})
+    cfg = Config.from_dict(
+        {
+            "guides": {"assignment_mode": "dual_guide_pair", "pair_assignment_primary": True},
+            "input": {"mtx_dirs": {"L1": "/x"}, "guide_mtx_dirs": {"L1": "/g"}},
+        }
+    )
     cfg.validate()
     assert cfg.guides.assignment_mode == "dual_guide_pair"
     with pytest.raises(ValueError, match="pair_assignment_primary"):
-        Config.from_dict({"guides": {"assignment_mode": "pair", "pair_assignment_primary": False}, "input": {"mtx_dirs": {"L1": "/x"}}}).validate()
+        Config.from_dict(
+            {
+                "guides": {"assignment_mode": "pair", "pair_assignment_primary": False},
+                "input": {"mtx_dirs": {"L1": "/x"}},
+            }
+        ).validate()

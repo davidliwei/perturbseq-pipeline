@@ -84,10 +84,10 @@ def run_scrublet(expr: ad.AnnData, cfg: Config, sample_id: str, seed: Optional[i
         expr.obs[PREDICTED_DOUBLET] = False
         summary["threshold_mode"] = "disabled"
         return summary
-
     t0 = time.time()
-    light = ad.AnnData(X=expr.X, obs=pd.DataFrame(index=expr.obs_names.copy()),
-                       var=pd.DataFrame(index=expr.var_names.copy()))
+    light = ad.AnnData(
+        X=expr.X, obs=pd.DataFrame(index=expr.obs_names.copy()), var=pd.DataFrame(index=expr.var_names.copy())
+    )
     kwargs = dict(
         sim_doublet_ratio=dcfg.sim_doublet_ratio,
         expected_doublet_rate=summary["expected_doublet_rate"],
@@ -108,7 +108,6 @@ def run_scrublet(expr: ad.AnnData, cfg: Config, sample_id: str, seed: Optional[i
         summary["error"] = str(exc)
         summary["elapsed_seconds"] = time.time() - t0
         return summary
-
     score = pd.to_numeric(light.obs[DOUBLET_SCORE], errors="coerce").reindex(expr.obs_names)
     pred = light.obs[PREDICTED_DOUBLET].reindex(expr.obs_names)
     scr_uns = light.uns.get("scrublet", {}) if hasattr(light, "uns") else {}
@@ -117,7 +116,8 @@ def run_scrublet(expr: ad.AnnData, cfg: Config, sample_id: str, seed: Optional[i
     if not threshold_ok or pred.isna().all():
         logger.warning(
             "%s: Scrublet could not set an automatic threshold; storing scores only "
-            "(predicted_doublet=False for every cell)", sample_id,
+            "(predicted_doublet=False for every cell)",
+            sample_id,
         )
         summary["threshold_failed"] = True
         pred_bool = np.zeros(n_before, dtype=bool)
@@ -145,8 +145,12 @@ def run_scrublet(expr: ad.AnnData, cfg: Config, sample_id: str, seed: Optional[i
     summary["n_scored"] = int(np.isfinite(expr.obs[DOUBLET_SCORE].to_numpy(dtype=float)).sum())
     summary["n_predicted_doublets"] = int(pred_bool.sum())
     summary["fraction_predicted_doublets"] = float(pred_bool.mean()) if n_before else float("nan")
-    diag = assess_threshold(expr.obs[DOUBLET_SCORE].to_numpy(dtype=float), summary["threshold"],
-                            summary["n_predicted_doublets"], summary["threshold_mode"])
+    diag = assess_threshold(
+        expr.obs[DOUBLET_SCORE].to_numpy(dtype=float),
+        summary["threshold"],
+        summary["n_predicted_doublets"],
+        summary["threshold_mode"],
+    )
     summary.update(diag)
     expr.uns["scrublet"]["threshold_suspect"] = bool(diag["threshold_suspect"])
     expr.uns["scrublet"]["threshold_suspect_reason"] = diag["threshold_suspect_reason"] or "None"
@@ -154,14 +158,19 @@ def run_scrublet(expr: ad.AnnData, cfg: Config, sample_id: str, seed: Optional[i
         logger.warning(
             "%s: Scrublet automatic threshold %.3f looks implausible (%s); calls kept as annotation only — "
             "inspect doublet_score and consider qc.doublets.threshold",
-            sample_id, summary["threshold"], diag["threshold_suspect_reason"],
+            sample_id,
+            summary["threshold"],
+            diag["threshold_suspect_reason"],
         )
     summary["elapsed_seconds"] = time.time() - t0
     assert expr.n_obs == n_before, "Scrublet wrapper must never change the number of cells"
     logger.info(
         "%s: Scrublet %d/%d cells flagged as predicted doublets (threshold=%s, %.0fs); cells retained: %d",
-        sample_id, summary["n_predicted_doublets"], n_before,
+        sample_id,
+        summary["n_predicted_doublets"],
+        n_before,
         f"{summary['threshold']:.3f}" if summary["threshold"] is not None else "n/a",
-        summary["elapsed_seconds"], expr.n_obs,
+        summary["elapsed_seconds"],
+        expr.n_obs,
     )
     return summary

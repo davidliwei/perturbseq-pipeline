@@ -10,15 +10,12 @@ from perturbseq_pipeline.config import Config
 from perturbseq_pipeline.meta import build_perturbation_meta
 
 
-# ---------------------------------------------------------------------------
 # Test 12: Meta Table Integration
-# ---------------------------------------------------------------------------
 
 
 def test_meta_table_merges_all_dimensions():
     """Meta table should combine efficacy, PS, lochNESS, distance, and modules without combining into a single scalar score."""
     cfg = Config()
-
     # Perturbation strength (Stage 5)
     pert_df = pd.DataFrame(
         {
@@ -30,7 +27,6 @@ def test_meta_table_merges_all_dimensions():
             "is_hit_ntc": [True, False, True],
         }
     )
-
     # PS score (Stage 8)
     ps_df = pd.DataFrame(
         {
@@ -42,7 +38,6 @@ def test_meta_table_merges_all_dimensions():
             "pct_escaper": [10.0, 60.0, 8.0],
         }
     )
-
     # lochNESS (Stage 9)
     loch_df = pd.DataFrame(
         {
@@ -53,7 +48,6 @@ def test_meta_table_merges_all_dimensions():
             "pct_own_cells_enriched": [85.0, 10.0, 92.0],
         }
     )
-
     # Perturbation Distance (Stage 10)
     dist_df = pd.DataFrame(
         {
@@ -66,23 +60,10 @@ def test_meta_table_merges_all_dimensions():
             "significant": [True, False, True],
         }
     )
-
     # Co-functional modules (Stage 7)
-    co_df = pd.DataFrame(
-        {
-            "target_gene": ["GeneA", "GeneB", "GeneC"],
-            "cofunctional_module": ["M1", "M2", "M1"],
-        }
-    )
-
+    co_df = pd.DataFrame({"target_gene": ["GeneA", "GeneB", "GeneC"], "cofunctional_module": ["M1", "M2", "M1"]})
     # Phenotype modules (Stage 11)
-    ph_df = pd.DataFrame(
-        {
-            "target_gene": ["GeneA", "GeneB", "GeneC"],
-            "phenotype_module": ["PM1", "PM3", "PM1"],
-        }
-    )
-
+    ph_df = pd.DataFrame({"target_gene": ["GeneA", "GeneB", "GeneC"], "phenotype_module": ["PM1", "PM3", "PM1"]})
     meta = build_perturbation_meta(
         cfg=cfg,
         perturbation_table=pert_df,
@@ -93,7 +74,6 @@ def test_meta_table_merges_all_dimensions():
         phenotype_modules=ph_df,
         primary_control="ntc",
     )
-
     assert not meta.empty
     assert len(meta) == 3
     # Check all key columns exist
@@ -118,7 +98,6 @@ def test_meta_table_merges_all_dimensions():
     ]
     for col in expected_cols:
         assert col in meta.columns, f"Missing column {col} in perturbation_meta"
-
     # Confirm NO arbitrary combined single score exists
     for col in meta.columns:
         assert "master_score" not in col and "combined_score" not in col, (
@@ -126,9 +105,7 @@ def test_meta_table_merges_all_dimensions():
         )
 
 
-# ---------------------------------------------------------------------------
 # Test 13: H5AD Storage Policy (Lean H5AD)
-# ---------------------------------------------------------------------------
 
 
 def test_h5ad_storage_invariants():
@@ -138,15 +115,12 @@ def test_h5ad_storage_invariants():
 
     obs = pd.DataFrame({"target_gene": ["A", "B", "C"], "perturbation_class": ["targeting"] * 3})
     expr = ad.AnnData(X=sparse.csr_matrix(np.zeros((3, 10))), obs=obs)
-
     # Validate that DistanceSpace results are not placed into expr.uns
     assert "perturbation_distance_matrix" not in expr.uns
     assert "distance_space" not in expr.uns
 
 
-# ---------------------------------------------------------------------------
 # Test 14: Existing YAML configs parse cleanly
-# ---------------------------------------------------------------------------
 
 
 def test_all_config_yamls_parse():
@@ -154,7 +128,6 @@ def test_all_config_yamls_parse():
     config_dir = Path(__file__).parent.parent / "config"
     yaml_files = list(config_dir.glob("*.yaml"))
     assert len(yaml_files) > 0, "No YAML config files found"
-
     for y_path in yaml_files:
         with open(y_path) as f:
             data = yaml.safe_load(f)

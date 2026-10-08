@@ -1,4 +1,5 @@
 """Unit tests for the configurable dual-guide (scaffold A + C) pair assignment."""
+
 from __future__ import annotations
 
 import anndata as ad
@@ -58,7 +59,7 @@ CELLS = {
     "same_target": {"A1": 10, "C1": 8},
     "target_ntc": {"A1": 10, "Cn": 9},
     "dual_target": {"A1": 10, "C3": 10},
-    "cross_pair": {"A1": 10, "C2": 10},      # X guides but different designed vectors
+    "cross_pair": {"A1": 10, "C2": 10},  # X guides but different designed vectors
     "missing_C": {"A1": 10},
     "multi_A": {"A1": 10, "A2": 8, "C1": 10},
     "multi_C": {"A1": 10, "C1": 10, "C2": 7},
@@ -75,14 +76,18 @@ def _build(mode="pair", pair_map=None, policy="ambiguous", with_scaffold_var=Tru
     for i, (cell, counts) in enumerate(CELLS.items()):
         for g, v in counts.items():
             X[i, COL[g]] = v
-    var = pd.DataFrame({"target_gene_name": TARGETS, "is_non_targeting": [t == "NO-TARGET" for t in TARGETS]}, index=GUIDES)
+    var = pd.DataFrame(
+        {"target_gene_name": TARGETS, "is_non_targeting": [t == "NO-TARGET" for t in TARGETS]}, index=GUIDES
+    )
     if with_scaffold_var:
         var["scaffold"] = SCAFFOLD
     guides = ad.AnnData(X=sparse.csr_matrix(X), var=var)
     guides.obs_names = names
-    expr = ad.AnnData(X=sparse.csr_matrix(np.ones((len(names), 4))),
-                      obs=pd.DataFrame({"lane_id": ["L1"] * 6 + ["L2"] * (len(names) - 6)}, index=names),
-                      var=pd.DataFrame(index=[f"g{i}" for i in range(4)]))
+    expr = ad.AnnData(
+        X=sparse.csr_matrix(np.ones((len(names), 4))),
+        obs=pd.DataFrame({"lane_id": ["L1"] * 6 + ["L2"] * (len(names) - 6)}, index=names),
+        var=pd.DataFrame(index=[f"g{i}" for i in range(4)]),
+    )
     cfg = Config()
     cfg.guides.assignment_mode = mode
     cfg.guides.target_feature_column = "target_gene_name"
@@ -100,7 +105,17 @@ def _build(mode="pair", pair_map=None, policy="ambiguous", with_scaffold_var=Tru
 def _pair_map(tmp_path, explicit):
     df = pd.DataFrame({"guide_id": GUIDES, "scaffold": SCAFFOLD, "target_gene_name": TARGETS})
     if explicit:
-        pairs = {"A1": "V1", "C1": "V1", "A2": "V2", "C2": "V2", "A3": "V3", "C3": "V3", "An": "Vn", "Cn": "Vn", "Z1": ""}
+        pairs = {
+            "A1": "V1",
+            "C1": "V1",
+            "A2": "V2",
+            "C2": "V2",
+            "A3": "V3",
+            "C3": "V3",
+            "An": "Vn",
+            "Cn": "Vn",
+            "Z1": "",
+        }
         df["pair_id"] = [pairs[g] for g in GUIDES]
     else:
         df["pair_id"] = ""
@@ -129,7 +144,6 @@ def test_targeting_plus_ntc_pair_policies():
     assert o[OBS_CLASS] == CLASS_AMBIGUOUS and o[OBS_PAIR_STATUS] == STATUS_PAIR_TARGET_NTC
     assert o[OBS_PAIR] == "X"  # the intended target is still recorded
     assert o[OBS_SLOT_TARGET.format(c="C")] == "ntc"
-
     expr, guides, cfg = _build(policy="provisional_target")
     res = assign_guides(expr, guides, cfg)
     o = res.obs.loc["target_ntc"]
@@ -332,14 +346,34 @@ def test_explicit_map_with_multi_construct_ids_and_resolution_details(tmp_path):
     """A slot feature may belong to several constructs (';'-separated ids); non-designed
     combinations are labelled by reason and never assigned."""
     from perturbseq_pipeline.dual_guides import (
-        CONSTRUCT_DUAL, CONSTRUCT_NONE, CONSTRUCT_NTC, CONSTRUCT_SINGLE_NTC, DETAIL_DESIGNED_DUAL, DETAIL_DESIGNED_NTC,
-        DETAIL_DESIGNED_SINGLE_NTC, DETAIL_SAME_TARGET_NOT_DESIGNED, DETAIL_TARGET_NTC_NOT_DESIGNED, DETAIL_TWO_TARGETS_NOT_DESIGNED,
-        OBS_CONSTRUCT_TYPE, OBS_PAIR_DETAIL, pair_resolution_detail_table,
+        CONSTRUCT_DUAL,
+        CONSTRUCT_NONE,
+        CONSTRUCT_NTC,
+        CONSTRUCT_SINGLE_NTC,
+        DETAIL_DESIGNED_DUAL,
+        DETAIL_DESIGNED_NTC,
+        DETAIL_DESIGNED_SINGLE_NTC,
+        DETAIL_SAME_TARGET_NOT_DESIGNED,
+        DETAIL_TARGET_NTC_NOT_DESIGNED,
+        DETAIL_TWO_TARGETS_NOT_DESIGNED,
+        OBS_CONSTRUCT_TYPE,
+        OBS_PAIR_DETAIL,
+        pair_resolution_detail_table,
     )
 
     df = pd.DataFrame({"guide_id": GUIDES, "scaffold": SCAFFOLD, "target_gene_name": TARGETS})
     # V1 = A1+C1, V2 = A2+C2, V3 = A3+C3, Vn = An+Cn (NTC pair), S1 = C1 (targeting) + An (NTC filler)
-    pairs = {"A1": "V1", "C1": "V1;S1", "A2": "V2", "C2": "V2", "A3": "V3", "C3": "V3", "An": "Vn;S1", "Cn": "Vn", "Z1": ""}
+    pairs = {
+        "A1": "V1",
+        "C1": "V1;S1",
+        "A2": "V2",
+        "C2": "V2",
+        "A3": "V3",
+        "C3": "V3",
+        "An": "Vn;S1",
+        "Cn": "Vn",
+        "Z1": "",
+    }
     df["pair_id"] = [pairs[g] for g in GUIDES]
     pm = tmp_path / "pair_map_multi.csv"
     df.to_csv(pm, index=False)
@@ -353,22 +387,50 @@ def test_explicit_map_with_multi_construct_ids_and_resolution_details(tmp_path):
     o = res.obs
     s1 = o.loc["zero"]
     assert s1[OBS_PAIR_STATUS] == STATUS_PAIR_TARGET_NTC and s1[OBS_CLASS] == CLASS_TARGETING and s1[OBS_TARGET] == "X"
-    assert s1[OBS_PAIR_ID] == "S1" and s1[OBS_CONSTRUCT_TYPE] == CONSTRUCT_SINGLE_NTC and s1[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_SINGLE_NTC
+    assert (
+        s1[OBS_PAIR_ID] == "S1"
+        and s1[OBS_CONSTRUCT_TYPE] == CONSTRUCT_SINGLE_NTC
+        and s1[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_SINGLE_NTC
+    )
     assert not bool(s1[OBS_PAIR_PROVISIONAL])
     d = o.loc["same_target"]
-    assert d[OBS_PAIR_STATUS] == STATUS_PAIR_TARGETING and d[OBS_PAIR_ID] == "V1" and d[OBS_CONSTRUCT_TYPE] == CONSTRUCT_DUAL and d[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_DUAL
+    assert (
+        d[OBS_PAIR_STATUS] == STATUS_PAIR_TARGETING
+        and d[OBS_PAIR_ID] == "V1"
+        and d[OBS_CONSTRUCT_TYPE] == CONSTRUCT_DUAL
+        and d[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_DUAL
+    )
     n = o.loc["ntc_pair"]
-    assert n[OBS_PAIR_STATUS] == STATUS_PAIR_NTC and n[OBS_PAIR_ID] == "Vn" and n[OBS_CONSTRUCT_TYPE] == CONSTRUCT_NTC and n[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_NTC
+    assert (
+        n[OBS_PAIR_STATUS] == STATUS_PAIR_NTC
+        and n[OBS_PAIR_ID] == "Vn"
+        and n[OBS_CONSTRUCT_TYPE] == CONSTRUCT_NTC
+        and n[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_NTC
+    )
     # A1 (V1) + C2 (V2): same target, not a construct
     x = o.loc["cross_pair"]
-    assert x[OBS_PAIR_STATUS] == STATUS_UNRESOLVED and x[OBS_CLASS] == CLASS_AMBIGUOUS and x[OBS_PAIR_DETAIL] == DETAIL_SAME_TARGET_NOT_DESIGNED
-    assert x[OBS_PAIR] == "X" and x[OBS_TARGET] == cfg.guides.ambiguous_label and x[OBS_CONSTRUCT_TYPE] == CONSTRUCT_NONE
+    assert (
+        x[OBS_PAIR_STATUS] == STATUS_UNRESOLVED
+        and x[OBS_CLASS] == CLASS_AMBIGUOUS
+        and x[OBS_PAIR_DETAIL] == DETAIL_SAME_TARGET_NOT_DESIGNED
+    )
+    assert (
+        x[OBS_PAIR] == "X" and x[OBS_TARGET] == cfg.guides.ambiguous_label and x[OBS_CONSTRUCT_TYPE] == CONSTRUCT_NONE
+    )
     # A1 (V1) + Cn (Vn): targeting + NTC but not the designed S1 construct
     t = o.loc["target_ntc"]
-    assert t[OBS_PAIR_STATUS] == STATUS_UNRESOLVED and t[OBS_CLASS] == CLASS_AMBIGUOUS and t[OBS_PAIR_DETAIL] == DETAIL_TARGET_NTC_NOT_DESIGNED
+    assert (
+        t[OBS_PAIR_STATUS] == STATUS_UNRESOLVED
+        and t[OBS_CLASS] == CLASS_AMBIGUOUS
+        and t[OBS_PAIR_DETAIL] == DETAIL_TARGET_NTC_NOT_DESIGNED
+    )
     # A1 (V1) + C3 (V3): two targets
     dd = o.loc["dual_target"]
-    assert dd[OBS_PAIR_STATUS] == STATUS_DUAL_TARGET and dd[OBS_PAIR_DETAIL] == DETAIL_TWO_TARGETS_NOT_DESIGNED and dd[OBS_CLASS] == CLASS_AMBIGUOUS
+    assert (
+        dd[OBS_PAIR_STATUS] == STATUS_DUAL_TARGET
+        and dd[OBS_PAIR_DETAIL] == DETAIL_TWO_TARGETS_NOT_DESIGNED
+        and dd[OBS_CLASS] == CLASS_AMBIGUOUS
+    )
     assert (o[OBS_PAIR_DETAIL].astype(str) != "").all()
     tab = pair_resolution_detail_table(res)
     assert tab["n_cells_all"].sum() == res.n_obs
@@ -379,21 +441,30 @@ def test_explicit_map_with_multi_construct_ids_and_resolution_details(tmp_path):
 
 def test_slot_dominance_ratio_pseudocount_rule_and_columns(tmp_path):
     """(top+1)/(second+1) >= dominance_ratio per scaffold slot, stored per slot; the eight required cases."""
-    from perturbseq_pipeline.dual_guides import OBS_SLOT_COUNT, OBS_SLOT_RATIO, OBS_SLOT_SECOND, OBS_SLOT_STATUS, SLOT_MULTIPLE, SLOT_NONE, SLOT_RESOLVED, slot_dominance_ratio
+    from perturbseq_pipeline.dual_guides import (
+        OBS_SLOT_COUNT,
+        OBS_SLOT_RATIO,
+        OBS_SLOT_SECOND,
+        OBS_SLOT_STATUS,
+        SLOT_MULTIPLE,
+        SLOT_NONE,
+        SLOT_RESOLVED,
+        slot_dominance_ratio,
+    )
 
     pm = _pair_map(tmp_path, explicit=True)
     expr, guides, cfg = _build(pair_map=pm)
     X = np.zeros(guides.shape)
     names = list(CELLS)
     cases = {  # cell -> counts
-        "same_target": {"A1": 3, "C1": 3},          # zero second counts: ratio (3+1)/(0+1) = 4 -> pass, valid complete pair V1
+        "same_target": {"A1": 3, "C1": 3},  # zero second counts: ratio (3+1)/(0+1) = 4 -> pass, valid complete pair V1
         "target_ntc": {"A1": 3, "A2": 1, "C1": 3},  # top 3 / second 1: (4)/(2) = 2.0 -> pass
-        "dual_target": {"A1": 3, "A2": 2, "C1": 3}, # top 3 / second 2: (4)/(3) = 1.33 -> A slot ambiguous
-        "multi_A": {"A1": 10, "A2": 8, "C1": 10},   # ambiguous A slot
-        "multi_C": {"A1": 10, "C1": 10, "C2": 7},   # ambiguous C slot
-        "missing_C": {"A1": 10},                    # incomplete pair
-        "cross_pair": {"A1": 10, "C2": 10},         # invalid construct pair (V1 x V2)
-        "ntc_pair": {"An": 12, "Cn": 5},            # valid complete NTC pair Vn
+        "dual_target": {"A1": 3, "A2": 2, "C1": 3},  # top 3 / second 2: (4)/(3) = 1.33 -> A slot ambiguous
+        "multi_A": {"A1": 10, "A2": 8, "C1": 10},  # ambiguous A slot
+        "multi_C": {"A1": 10, "C1": 10, "C2": 7},  # ambiguous C slot
+        "missing_C": {"A1": 10},  # incomplete pair
+        "cross_pair": {"A1": 10, "C2": 10},  # invalid construct pair (V1 x V2)
+        "ntc_pair": {"An": 12, "Cn": 5},  # valid complete NTC pair Vn
     }
     for cell, counts in cases.items():
         for g, v in counts.items():
@@ -409,12 +480,27 @@ def test_slot_dominance_ratio_pseudocount_rule_and_columns(tmp_path):
     assert o.loc["same_target", OBS_PAIR_STATUS] == STATUS_PAIR_TARGETING and o.loc["same_target", OBS_PAIR_ID] == "V1"
     assert o.loc["target_ntc", rA] == 2.0 and o.loc["target_ntc", OBS_SLOT_STATUS.format(c="A")] == SLOT_RESOLVED
     assert o.loc["target_ntc", OBS_PAIR_STATUS] == STATUS_PAIR_TARGETING  # A1 (3 vs 1) + C1 -> V1
-    assert abs(o.loc["dual_target", rA] - 4 / 3) < 1e-9 and o.loc["dual_target", OBS_SLOT_STATUS.format(c="A")] == SLOT_MULTIPLE
+    assert (
+        abs(o.loc["dual_target", rA] - 4 / 3) < 1e-9
+        and o.loc["dual_target", OBS_SLOT_STATUS.format(c="A")] == SLOT_MULTIPLE
+    )
     assert o.loc["dual_target", OBS_PAIR_STATUS] == STATUS_AMBIGUOUS_SLOT.format(c="A")
-    assert o.loc["multi_A", OBS_PAIR_STATUS] == STATUS_AMBIGUOUS_SLOT.format(c="A") and abs(o.loc["multi_A", rA] - 11 / 9) < 1e-9
-    assert o.loc["multi_C", OBS_PAIR_STATUS] == STATUS_AMBIGUOUS_SLOT.format(c="C") and abs(o.loc["multi_C", rC] - 11 / 8) < 1e-9
-    assert o.loc["missing_C", OBS_PAIR_STATUS] == STATUS_INCOMPLETE and o.loc["missing_C", OBS_SLOT_STATUS.format(c="C")] == SLOT_NONE and o.loc["missing_C", rC] == 1.0
-    assert o.loc["cross_pair", OBS_PAIR_STATUS] == STATUS_UNRESOLVED and o.loc["cross_pair", OBS_CLASS] == CLASS_AMBIGUOUS
+    assert (
+        o.loc["multi_A", OBS_PAIR_STATUS] == STATUS_AMBIGUOUS_SLOT.format(c="A")
+        and abs(o.loc["multi_A", rA] - 11 / 9) < 1e-9
+    )
+    assert (
+        o.loc["multi_C", OBS_PAIR_STATUS] == STATUS_AMBIGUOUS_SLOT.format(c="C")
+        and abs(o.loc["multi_C", rC] - 11 / 8) < 1e-9
+    )
+    assert (
+        o.loc["missing_C", OBS_PAIR_STATUS] == STATUS_INCOMPLETE
+        and o.loc["missing_C", OBS_SLOT_STATUS.format(c="C")] == SLOT_NONE
+        and o.loc["missing_C", rC] == 1.0
+    )
+    assert (
+        o.loc["cross_pair", OBS_PAIR_STATUS] == STATUS_UNRESOLVED and o.loc["cross_pair", OBS_CLASS] == CLASS_AMBIGUOUS
+    )
     assert o.loc["ntc_pair", OBS_PAIR_STATUS] == STATUS_PAIR_NTC and o.loc["ntc_pair", OBS_CLASS] == CLASS_NTC
     assert res.uns["guide_assignment"]["dominance_pseudocount"] == 1.0 and "slot_rule" in res.uns["guide_assignment"]
     # helper matches the stored columns; a different pseudocount changes the ratio
@@ -425,10 +511,33 @@ def test_slot_dominance_ratio_pseudocount_rule_and_columns(tmp_path):
 
 def test_designed_targeting_plus_ntc_sensitivity_policy(tmp_path):
     """designed_targeting_plus_ntc_primary=False keeps designed S1 constructs out of the primary classes."""
-    from perturbseq_pipeline.dual_guides import CONSTRUCT_SINGLE_NTC, DETAIL_DESIGNED_SINGLE_NTC, OBS_CONSTRUCT_TYPE, OBS_PAIR_DETAIL, OBS_TARGET_SYMBOL
+    from perturbseq_pipeline.dual_guides import (
+        CONSTRUCT_SINGLE_NTC,
+        DETAIL_DESIGNED_SINGLE_NTC,
+        OBS_CONSTRUCT_TYPE,
+        OBS_PAIR_DETAIL,
+        OBS_TARGET_SYMBOL,
+    )
 
-    df = pd.DataFrame({"guide_id": GUIDES, "scaffold": SCAFFOLD, "target_gene_name": TARGETS, "target_symbol": [t if t != "NO-TARGET" else "ntc" for t in TARGETS]})
-    pairs = {"A1": "V1", "C1": "V1;S1", "A2": "V2", "C2": "V2", "A3": "V3", "C3": "V3", "An": "Vn;S1", "Cn": "Vn", "Z1": ""}
+    df = pd.DataFrame(
+        {
+            "guide_id": GUIDES,
+            "scaffold": SCAFFOLD,
+            "target_gene_name": TARGETS,
+            "target_symbol": [t if t != "NO-TARGET" else "ntc" for t in TARGETS],
+        }
+    )
+    pairs = {
+        "A1": "V1",
+        "C1": "V1;S1",
+        "A2": "V2",
+        "C2": "V2",
+        "A3": "V3",
+        "C3": "V3",
+        "An": "Vn;S1",
+        "Cn": "Vn",
+        "Z1": "",
+    }
     df["pair_id"] = [pairs[g] for g in GUIDES]
     pm = tmp_path / "pm.csv"
     df.to_csv(pm, index=False)
@@ -441,15 +550,27 @@ def test_designed_targeting_plus_ntc_sensitivity_policy(tmp_path):
         guides.X = sparse.csr_matrix(X)
         res = assign_guides(expr, guides, cfg)
         s1 = res.obs.loc["zero"]
-        assert s1[OBS_PAIR_STATUS] == STATUS_PAIR_TARGET_NTC and s1[OBS_PAIR_ID] == "S1" and s1[OBS_CONSTRUCT_TYPE] == CONSTRUCT_SINGLE_NTC
-        assert s1[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_SINGLE_NTC and s1[OBS_PAIR] == "X" and s1[OBS_TARGET_SYMBOL] == "X"
+        assert (
+            s1[OBS_PAIR_STATUS] == STATUS_PAIR_TARGET_NTC
+            and s1[OBS_PAIR_ID] == "S1"
+            and s1[OBS_CONSTRUCT_TYPE] == CONSTRUCT_SINGLE_NTC
+        )
+        assert (
+            s1[OBS_PAIR_DETAIL] == DETAIL_DESIGNED_SINGLE_NTC and s1[OBS_PAIR] == "X" and s1[OBS_TARGET_SYMBOL] == "X"
+        )
         if primary:
             assert s1[OBS_CLASS] == CLASS_TARGETING and s1[OBS_TARGET] == "X" and bool(s1["pair_assigned_primary"])
         else:
-            assert s1[OBS_CLASS] == CLASS_AMBIGUOUS and s1[OBS_TARGET] == cfg.guides.ambiguous_label and not bool(s1["pair_assigned_primary"])
+            assert (
+                s1[OBS_CLASS] == CLASS_AMBIGUOUS
+                and s1[OBS_TARGET] == cfg.guides.ambiguous_label
+                and not bool(s1["pair_assigned_primary"])
+            )
         assert res.obs.loc["same_target", OBS_CLASS] == CLASS_TARGETING  # dual-guide construct is primary either way
         lane = pair_assignment_per_lane(res)
-        assert int(lane.loc[lane.lane_id == "ALL", "n_pair_assigned_primary"].iloc[0]) == int(res.obs["pair_assigned_primary"].sum())
+        assert int(lane.loc[lane.lane_id == "ALL", "n_pair_assigned_primary"].iloc[0]) == int(
+            res.obs["pair_assigned_primary"].sum()
+        )
         assert res.uns["guide_assignment"]["designed_targeting_plus_ntc_primary"] is primary
 
 
@@ -467,7 +588,12 @@ def test_h5ad_name_sanitisation_keeps_mapping(tmp_path):
     a.obsm["ps score"] = np.zeros((3, 2))
     assert sanitize_h5ad_name("lochness_LIPA (rs1412444)") == "lochness_LIPA__rs1412444_"
     recs = sanitize_h5ad_names(a)
-    assert {r["original"] for r in recs} == {"lochness_LIPA (rs1412444)", "lochness_A/B", "scores/by target", "ps score"}
+    assert {r["original"] for r in recs} == {
+        "lochness_LIPA (rs1412444)",
+        "lochness_A/B",
+        "scores/by target",
+        "ps score",
+    }
     assert "lochness_A_B" in a.obs.columns and "ps_score" in a.obsm and "scores_by_target" in a.uns
     assert list(a.obs["target_gene"]) == ["LIPA (rs1412444)", "A/B", "ntc"]  # values (biological labels) untouched
     b = ad_.AnnData(X=sparse.csr_matrix(np.ones((2, 2))))

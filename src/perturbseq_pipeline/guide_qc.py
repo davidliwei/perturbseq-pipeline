@@ -70,10 +70,15 @@ def _structure_flags(detected: sp.csr_matrix, design: pd.DataFrame, cfg: Config)
     classes = scaffold_classes(design)
     scaf = design["scaffold"].astype(str).to_numpy() if "scaffold" in design else np.full(len(design), UNKNOWN_SCAFFOLD)
     n_guides = np.asarray(detected.sum(axis=1)).ravel().astype(np.int64)
-    n_by_class = {c: np.asarray(detected[:, np.where(scaf == c)[0]].sum(axis=1)).ravel().astype(np.int64) for c in classes}
+    n_by_class = {
+        c: np.asarray(detected[:, np.where(scaf == c)[0]].sum(axis=1)).ravel().astype(np.int64) for c in classes
+    }
     unknown_cols = np.where(scaf == UNKNOWN_SCAFFOLD)[0]
-    n_unknown = (np.asarray(detected[:, unknown_cols].sum(axis=1)).ravel().astype(np.int64)
-                 if len(unknown_cols) else np.zeros(detected.shape[0], dtype=np.int64))
+    n_unknown = (
+        np.asarray(detected[:, unknown_cols].sum(axis=1)).ravel().astype(np.int64)
+        if len(unknown_cols)
+        else np.zeros(detected.shape[0], dtype=np.int64)
+    )
     if classes:
         multiplet = np.zeros(detected.shape[0], dtype=bool)
         structure = np.ones(detected.shape[0], dtype=bool)
@@ -89,7 +94,9 @@ def _structure_flags(detected: sp.csr_matrix, design: pd.DataFrame, cfg: Config)
     return n_guides, n_by_class, n_unknown, multiplet, structure
 
 
-def guide_detection_sensitivity(counts: sp.csr_matrix, design: pd.DataFrame, cfg: Config, sample_id: str) -> pd.DataFrame:
+def guide_detection_sensitivity(
+    counts: sp.csr_matrix, design: pd.DataFrame, cfg: Config, sample_id: str
+) -> pd.DataFrame:
     """Flag fractions over a grid of detection rules (assessment only, nothing stored in obs)."""
     mcfg = cfg.guides.multiplet
     rows = []
@@ -98,15 +105,20 @@ def guide_detection_sensitivity(counts: sp.csr_matrix, design: pd.DataFrame, cfg
         for frac in mcfg.sensitivity_fractions:
             det = detected_mask(counts, int(thr), float(frac) or None)
             n_guides, _, _, multiplet, structure = _structure_flags(det, design, cfg)
-            rows.append({
-                "sample_id": sample_id, "detection_threshold_umi": int(thr), "min_fraction_of_top": float(frac),
-                "n_cells": n,
-                "frac_guide_detected": float((n_guides >= 1).mean()) if n else float("nan"),
-                "frac_guide_structure_pass": float(structure.mean()) if n else float("nan"),
-                "frac_guide_multiplet_flag": float(multiplet.mean()) if n else float("nan"),
-                "median_n_guides": float(np.median(n_guides)) if n else float("nan"),
-                "is_current_rule": int(thr) == detection_threshold(cfg) and (float(frac) or None) == mcfg.detection_min_fraction_of_top,
-            })
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "detection_threshold_umi": int(thr),
+                    "min_fraction_of_top": float(frac),
+                    "n_cells": n,
+                    "frac_guide_detected": float((n_guides >= 1).mean()) if n else float("nan"),
+                    "frac_guide_structure_pass": float(structure.mean()) if n else float("nan"),
+                    "frac_guide_multiplet_flag": float(multiplet.mean()) if n else float("nan"),
+                    "median_n_guides": float(np.median(n_guides)) if n else float("nan"),
+                    "is_current_rule": int(thr) == detection_threshold(cfg)
+                    and (float(frac) or None) == mcfg.detection_min_fraction_of_top,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -155,12 +167,16 @@ def infer_scaffold_classes(design: pd.DataFrame, results: Dict[str, GuideCountRe
     if low_purity.any():
         logger.warning(
             "%d guide(s) have mixed scaffold reads (purity < %.2f) and stay 'unknown': %s",
-            int(low_purity.sum()), mcfg.scaffold_purity_min, design.loc[low_purity, "guide_id"].head(5).tolist(),
+            int(low_purity.sum()),
+            mcfg.scaffold_purity_min,
+            design.loc[low_purity, "guide_id"].head(5).tolist(),
         )
     logger.info(
         "Scaffold classes: %s; %d guides assigned empirically, %d remain unknown (%d with no reads)",
-        dict(design["scaffold"].value_counts()), int(eligible.sum()),
-        int((design["scaffold"].astype(str) == UNKNOWN_SCAFFOLD).sum()), int((total == 0).sum()),
+        dict(design["scaffold"].value_counts()),
+        int(eligible.sum()),
+        int((design["scaffold"].astype(str) == UNKNOWN_SCAFFOLD).sum()),
+        int((total == 0).sum()),
     )
     return design
 
@@ -186,12 +202,7 @@ def _top_two(X: sp.csr_matrix):
     return top, top_idx, second
 
 
-def attach_guide_counts(
-    expr: ad.AnnData,
-    result: GuideCountResult,
-    design: pd.DataFrame,
-    cfg: Config,
-) -> ad.AnnData:
+def attach_guide_counts(expr: ad.AnnData, result: GuideCountResult, design: pd.DataFrame, cfg: Config) -> ad.AnnData:
     """Attach guide UMI counts to ``expr`` and annotate ``obs``. No subsetting."""
     n_before = expr.n_obs
     bare = strip_barcode_suffix(expr.obs[BARCODE_KEY].astype(str), cfg.guides.fastq.barcode_suffix_regex)
@@ -199,9 +210,7 @@ def attach_guide_counts(
         pos = {b: i for i, b in enumerate(result.cell_barcodes)}
         rows = np.array([pos.get(b, -1) for b in bare])
         if (rows < 0).any():
-            raise ValueError(
-                f"{result.sample_id}: {(rows < 0).sum()} GEX barcodes missing from the guide count rows"
-            )
+            raise ValueError(f"{result.sample_id}: {(rows < 0).sum()} GEX barcodes missing from the guide count rows")
         counts = result.counts[rows]
     else:
         counts = result.counts
@@ -213,7 +222,6 @@ def attach_guide_counts(
     expr.uns["guide_names"] = list(design["guide_id"].astype(str))
     expr.uns["guide_target_genes"] = list(design["target"].astype(str))
     expr.uns["guide_source"] = result.source
-
     thr = detection_threshold(cfg)
     min_frac = cfg.guides.multiplet.detection_min_fraction_of_top
     detected = detected_mask(counts, thr, min_frac)
@@ -225,7 +233,6 @@ def attach_guide_counts(
     obs["top_guide"] = np.where(top_idx >= 0, guide_ids[np.clip(top_idx, 0, None)], "none")
     obs["top_guide_umi"] = top
     obs["second_guide_umi"] = second
-
     classes = scaffold_classes(design)
     scaf = design["scaffold"].astype(str).to_numpy() if "scaffold" in design else np.full(len(design), UNKNOWN_SCAFFOLD)
     class_cols: Dict[str, np.ndarray] = {c: np.where(scaf == c)[0] for c in classes}
@@ -242,10 +249,13 @@ def attach_guide_counts(
         obs[f"top_guide_{c}"] = np.where(ti >= 0, ids_c[np.clip(ti, 0, None)], "none")
         obs[f"top_guide_{c}_umi"] = t
         obs[f"second_guide_{c}_umi"] = s2
-    n_unknown = np.asarray(detected[:, unknown_cols].sum(axis=1)).ravel().astype(np.int64) if len(unknown_cols) else np.zeros(expr.n_obs, dtype=np.int64)
+    n_unknown = (
+        np.asarray(detected[:, unknown_cols].sum(axis=1)).ravel().astype(np.int64)
+        if len(unknown_cols)
+        else np.zeros(expr.n_obs, dtype=np.int64)
+    )
     if len(unknown_cols) and classes:
         obs["n_guides_unknown_scaffold"] = n_unknown
-
     mcfg = cfg.guides.multiplet
     n_guides = obs["n_guides"].to_numpy()
     obs["guide_detected"] = n_guides >= 1
@@ -282,8 +292,12 @@ def attach_guide_counts(
     assert expr.n_obs == n_before, "guide QC must never change the number of cells"
     logger.info(
         "%s: guide QC — detected %d/%d cells, structure_pass %d, multiplet_flag %d (flag only; %d cells retained)",
-        result.sample_id, int(obs["guide_detected"].sum()), n_before, int(obs["guide_structure_pass"].sum()),
-        int(obs["guide_multiplet_flag"].sum()), expr.n_obs,
+        result.sample_id,
+        int(obs["guide_detected"].sum()),
+        n_before,
+        int(obs["guide_structure_pass"].sum()),
+        int(obs["guide_multiplet_flag"].sum()),
+        expr.n_obs,
     )
     return expr
 
@@ -311,7 +325,9 @@ def empty_guide_annotations(expr: ad.AnnData, cfg: Config, classes: Sequence[str
     return expr
 
 
-def guide_sample_summary(expr: ad.AnnData, sample_id: str, result: Optional[GuideCountResult], design: Optional[pd.DataFrame], cfg: Config) -> Dict[str, object]:
+def guide_sample_summary(
+    expr: ad.AnnData, sample_id: str, result: Optional[GuideCountResult], design: Optional[pd.DataFrame], cfg: Config
+) -> Dict[str, object]:
     """One row of the guide QC summary table for a sample."""
     obs = expr.obs
     row: Dict[str, object] = {
@@ -322,16 +338,29 @@ def guide_sample_summary(expr: ad.AnnData, sample_id: str, result: Optional[Guid
     }
     if result is not None:
         st = result.stats
-        for k in ("reads_total", "reads_with_tso", "reads_with_scaffold_anchor", "reads_spacer_matched",
-                  "reads_spacer_matched_via_shift", "reads_spacer_unmatched", "reads_matched_barcode_in_gex",
-                  "reads_matched_barcode_not_in_gex", "frac_reads_spacer_matched",
-                  "frac_matched_reads_in_gex_barcodes", "unique_cell_guide_umis", "total_guide_umis_in_matrix",
-                  "guides_designed", "guides_detected_any_umi"):
+        for k in (
+            "reads_total",
+            "reads_with_tso",
+            "reads_with_scaffold_anchor",
+            "reads_spacer_matched",
+            "reads_spacer_matched_via_shift",
+            "reads_spacer_unmatched",
+            "reads_matched_barcode_in_gex",
+            "reads_matched_barcode_not_in_gex",
+            "frac_reads_spacer_matched",
+            "frac_matched_reads_in_gex_barcodes",
+            "unique_cell_guide_umis",
+            "total_guide_umis_in_matrix",
+            "guides_designed",
+            "guides_detected_any_umi",
+        ):
             if k in st:
                 row[k] = st[k]
         umis = result.guide_umis()
         row["guides_with_any_cell_umi"] = int((umis > 0).sum())
-        row["guides_with_positive_cells_at_threshold"] = int((result.guide_positive_cells(detection_threshold(cfg)) > 0).sum())
+        row["guides_with_positive_cells_at_threshold"] = int(
+            (result.guide_positive_cells(detection_threshold(cfg)) > 0).sum()
+        )
     if "guide_detected" in obs:
         row["cells_guide_detected"] = int(obs["guide_detected"].sum())
         row["cells_guide_structure_pass"] = int(obs["guide_structure_pass"].sum())

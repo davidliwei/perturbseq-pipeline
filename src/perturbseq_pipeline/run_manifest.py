@@ -58,15 +58,7 @@ STAGES: List[tuple] = [
 _LABELS = dict(STAGES)
 
 #: Config sections with an ``enabled`` switch, i.e. the optional modules.
-OPTIONAL_MODULES = (
-    "enrichment",
-    "modules",
-    "ps_score",
-    "lochness",
-    "distance",
-    "distance_space",
-    "meta_analysis",
-)
+OPTIONAL_MODULES = ("enrichment", "modules", "ps_score", "lochness", "distance", "distance_space", "meta_analysis")
 
 
 class ModuleStatusTracker:
@@ -80,14 +72,7 @@ class ModuleStatusTracker:
     def start(self, key: str) -> None:
         self._started[key] = time.time()
 
-    def mark(
-        self,
-        key: str,
-        status: str,
-        note: str = "",
-        *,
-        enabled: bool = True,
-    ) -> None:
+    def mark(self, key: str, status: str, note: str = "", *, enabled: bool = True) -> None:
         t0 = self._started.pop(key, None)
         seconds = round(time.time() - t0, 1) if t0 is not None else None
         self._rows[key] = {
@@ -126,9 +111,7 @@ class ModuleStatusTracker:
                         "seconds": None,
                     }
                 )
-        return pd.DataFrame(
-            rows, columns=["module", "label", "enabled", "status", "note", "seconds"]
-        )
+        return pd.DataFrame(rows, columns=["module", "label", "enabled", "status", "note", "seconds"])
 
     def summary(self) -> Dict[str, int]:
         out: Dict[str, int] = {}
@@ -312,6 +295,11 @@ def manifest_summary_rows(rec: Dict[str, Any]) -> List[tuple]:
         ("Modules enabled", on),
         ("Modules disabled", off),
         ("SLURM job", ((rec.get("environment") or {}).get("slurm") or {}).get("slurm_job_id") or "none"),
-        ("Run manifest", str(Path(rec.get("resolved_config", "")).with_name("run_manifest.json")) if rec.get("resolved_config") else ""),
+        (
+            "Run manifest",
+            str(Path(rec.get("resolved_config", "")).with_name("run_manifest.json"))
+            if rec.get("resolved_config")
+            else "",
+        ),
     ]
     return rows

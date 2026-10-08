@@ -20,9 +20,7 @@ from perturbseq_pipeline.distance import (
 from perturbseq_pipeline.perturbation import benjamini_hochberg
 
 
-# ---------------------------------------------------------------------------
 # Test 1 & 2: Mathematical Distance Properties
-# ---------------------------------------------------------------------------
 
 
 def test_energy_distance_near_zero_for_identical_distributions():
@@ -31,7 +29,6 @@ def test_energy_distance_near_zero_for_identical_distributions():
     # Two independent samples from the same standard normal distribution
     X = rng.normal(loc=0.0, scale=1.0, size=(200, 20))
     Y = rng.normal(loc=0.0, scale=1.0, size=(250, 20))
-
     edist = compute_energy_distance(X, Y)
     # For identical distributions in 20D with ~200 cells, empirical sample energy distance is small
     assert edist < 0.15, f"Expected small energy distance for null distribution, got {edist}"
@@ -43,10 +40,8 @@ def test_energy_distance_increases_for_separated_distributions():
     X = rng.normal(loc=0.0, scale=1.0, size=(100, 10))
     Y_near = rng.normal(loc=0.5, scale=1.0, size=(100, 10))
     Y_far = rng.normal(loc=3.0, scale=1.0, size=(100, 10))
-
     d_near = compute_energy_distance(X, Y_near)
     d_far = compute_energy_distance(X, Y_far)
-
     assert d_far > d_near > 0.0, f"Expected d_far > d_near, got {d_far} vs {d_near}"
 
 
@@ -56,16 +51,12 @@ def test_mmd_distance_properties():
     X = rng.normal(loc=0.0, scale=1.0, size=(100, 10))
     Y_null = rng.normal(loc=0.0, scale=1.0, size=(100, 10))
     Y_shift = rng.normal(loc=2.0, scale=1.0, size=(100, 10))
-
     mmd_null = compute_mmd(X, Y_null)
     mmd_shift = compute_mmd(X, Y_shift)
-
     assert mmd_shift > mmd_null >= 0.0
 
 
-# ---------------------------------------------------------------------------
 # Test 3 & 4: Permutation DistanceTest
-# ---------------------------------------------------------------------------
 
 
 def test_distance_test_detects_strong_difference():
@@ -73,7 +64,6 @@ def test_distance_test_detects_strong_difference():
     rng = np.random.default_rng(123)
     X = rng.normal(loc=2.0, scale=1.0, size=(60, 10))
     Y = rng.normal(loc=-2.0, scale=1.0, size=(100, 10))
-
     obs_dist, pval = distance_test_permutation(X, Y, n_permutations=200, seed=123)
     assert obs_dist > 0.5
     assert pval < 0.05, f"Expected p < 0.05 for strongly shifted groups, got {pval}"
@@ -84,37 +74,30 @@ def test_distance_test_null_distribution():
     rng = np.random.default_rng(999)
     X = rng.normal(loc=0.0, scale=1.0, size=(50, 10))
     Y = rng.normal(loc=0.0, scale=1.0, size=(100, 10))
-
     obs_dist, pval = distance_test_permutation(X, Y, n_permutations=200, seed=999)
     assert pval > 0.05, f"Expected non-significant p-value under null, got {pval}"
 
 
-# ---------------------------------------------------------------------------
 # Test 5: Benjamini-Hochberg Correction
-# ---------------------------------------------------------------------------
 
 
 def test_benjamini_hochberg_correction():
     """BH-FDR should preserve monotonicity and bound false discovery rates."""
     pvals = np.array([0.001, 0.01, 0.04, 0.5, 0.8])
     fdrs = benjamini_hochberg(pvals)
-
     assert len(fdrs) == len(pvals)
     assert np.all(fdrs >= pvals), "FDR values must be >= uncorrected p-values"
     assert np.all(np.diff(fdrs) >= -1e-12), "FDR values must be monotonically non-decreasing with sorted p-values"
     assert np.all((fdrs >= 0) & (fdrs <= 1.0))
 
 
-# ---------------------------------------------------------------------------
 # Test 6 & 7: Deterministic Bounded Sampling
-# ---------------------------------------------------------------------------
 
 
 def test_sampling_never_exceeds_max_cells():
     """Sampling should never return more cells than max_cells_per_target."""
     all_indices = np.arange(5000)
     rng = np.random.default_rng(123)
-
     sampled = _sample_cell_indices(all_indices, max_cells=1000, rng=rng)
     assert len(sampled) == 1000
     assert len(np.unique(sampled)) == 1000
@@ -126,7 +109,6 @@ def test_sampling_reproducibility():
     all_indices = np.arange(3000)
     sampled_1 = _sample_cell_indices(all_indices, max_cells=500, rng=np.random.default_rng(42))
     sampled_2 = _sample_cell_indices(all_indices, max_cells=500, rng=np.random.default_rng(42))
-
     np.testing.assert_array_equal(sampled_1, sampled_2)
 
 
@@ -135,22 +117,17 @@ def test_sampling_stratification_by_lane():
     all_indices = np.arange(1000)
     # 800 cells from lane1, 200 from lane2
     strata = np.array(["lane1"] * 800 + ["lane2"] * 200)
-
     sampled = _sample_cell_indices(all_indices, max_cells=200, rng=np.random.default_rng(123), strata=strata)
     assert len(sampled) == 200
-
     sampled_strata = strata[sampled]
     n_lane1 = (sampled_strata == "lane1").sum()
     n_lane2 = (sampled_strata == "lane2").sum()
-
     # ~80% (160) lane1, ~20% (40) lane2
     assert 140 <= n_lane1 <= 180
     assert 20 <= n_lane2 <= 60
 
 
-# ---------------------------------------------------------------------------
 # Test 8: Small Perturbation Groups Below min_cells Skipped
-# ---------------------------------------------------------------------------
 
 
 def _create_synthetic_anndata():
@@ -158,34 +135,17 @@ def _create_synthetic_anndata():
     rng = np.random.default_rng(123)
     n_cells = 300
     n_pcs = 20
-
     # 100 NTC cells, 80 TargetA (shifted), 80 TargetB (null), 40 TargetSmall (< min_cells if min_cells=50)
     classes = ["non-targeting"] * 100 + ["targeting"] * 200
-    targets = (
-        ["ntc"] * 100
-        + ["TargetA"] * 80
-        + ["TargetB"] * 80
-        + ["TargetSmall"] * 40
-    )
-
+    targets = ["ntc"] * 100 + ["TargetA"] * 80 + ["TargetB"] * 80 + ["TargetSmall"] * 40
     pca = rng.normal(0, 1, size=(n_cells, n_pcs))
     # Shift TargetA cells
     pca[100:180, 0] += 3.0
-
     obs = pd.DataFrame(
-        {
-            "target_gene": targets,
-            "perturbation_class": classes,
-            "lane_id": ["lane1"] * 150 + ["lane2"] * 150,
-        },
+        {"target_gene": targets, "perturbation_class": classes, "lane_id": ["lane1"] * 150 + ["lane2"] * 150},
         index=[f"cell_{i}" for i in range(n_cells)],
     )
-
-    expr = ad.AnnData(
-        X=sparse.csr_matrix(np.zeros((n_cells, 50))),
-        obs=obs,
-        obsm={"X_pca": pca},
-    )
+    expr = ad.AnnData(X=sparse.csr_matrix(np.zeros((n_cells, 50))), obs=obs, obsm={"X_pca": pca})
     return expr
 
 
@@ -196,23 +156,18 @@ def test_small_groups_skipped_and_reported():
     cfg.distance.enabled = True  # optional stage, off by default
     cfg.distance.min_cells = 50
     cfg.distance.n_permutations = 100
-
     results = compute_perturbation_distance(expr, cfg)
     assert results is not None
-
     tested_targets = results.table["target_gene"].tolist()
     assert "TargetA" in tested_targets
     assert "TargetB" in tested_targets
     assert "TargetSmall" not in tested_targets
-
     assert not results.skipped.empty
     skipped_targets = results.skipped["target_gene"].tolist()
     assert "TargetSmall" in skipped_targets
 
 
-# ---------------------------------------------------------------------------
 # Test 9, 10, 11: DistanceSpace, PCoA, Neighbors, Phenotype Modules
-# ---------------------------------------------------------------------------
 
 
 def test_distance_space_symmetry_and_zero_diagonal():
@@ -221,11 +176,9 @@ def test_distance_space_symmetry_and_zero_diagonal():
     cfg = Config()
     cfg.distance_space.enabled = True  # optional stage, off by default
     cfg.distance_space.min_cells = 30
-
     res = compute_distance_space(expr, cfg)
     assert res is not None
     mat = res.distance_matrix
-
     assert not mat.empty
     assert (mat.index == mat.columns).all()
     # Check zero diagonal
@@ -237,15 +190,7 @@ def test_distance_space_symmetry_and_zero_diagonal():
 def test_pcoa_coordinates_finite_and_positive_eigenvalues():
     """PCoA coordinates must be finite and properly handle non-Euclidean artifacts."""
     # Synthetic distance matrix
-    D = np.array(
-        [
-            [0.0, 1.2, 2.5, 3.0],
-            [1.2, 0.0, 2.1, 2.8],
-            [2.5, 2.1, 0.0, 1.0],
-            [3.0, 2.8, 1.0, 0.0],
-        ]
-    )
-
+    D = np.array([[0.0, 1.2, 2.5, 3.0], [1.2, 0.0, 2.1, 2.8], [2.5, 2.1, 0.0, 1.0], [3.0, 2.8, 1.0, 0.0]])
     coords, evals = compute_pcoa_coordinates(D, n_components=3)
     assert coords.shape[0] == 4
     assert coords.shape[1] <= 3
@@ -260,11 +205,9 @@ def test_nearest_neighbors_ranking():
     cfg.distance_space.enabled = True  # optional stage, off by default
     cfg.distance_space.min_cells = 30
     cfg.distance_space.nearest_neighbors = 2
-
     res = compute_distance_space(expr, cfg)
     assert res is not None
     nn_df = res.neighbors
-
     assert not nn_df.empty
     assert set(nn_df.columns) == {"target", "neighbor", "distance", "rank"}
     # No self neighbors
@@ -273,9 +216,7 @@ def test_nearest_neighbors_ranking():
     assert set(nn_df["rank"].unique()) == {1, 2}
 
 
-# ---------------------------------------------------------------------------
 # Test 15 & 16: Pipeline Integration with Toggle Switches
-# ---------------------------------------------------------------------------
 
 
 def _create_pipeline_synthetic_h5ad(tmp_path):
@@ -283,21 +224,13 @@ def _create_pipeline_synthetic_h5ad(tmp_path):
     rng = np.random.default_rng(42)
     n_cells = 400
     n_genes = 60
-
     # Counts
     counts = rng.poisson(lam=2.0, size=(n_cells, n_genes)).astype(np.float32)
     var = pd.DataFrame(index=[f"Gene{i}" for i in range(n_genes)])
     var["feature_types"] = "Gene Expression"
-
-    targets = (
-        ["non-targeting"] * 100
-        + ["Gene0"] * 100
-        + ["Gene1"] * 100
-        + ["Gene2"] * 100
-    )
+    targets = ["non-targeting"] * 100 + ["Gene0"] * 100 + ["Gene1"] * 100 + ["Gene2"] * 100
     # Knock down Gene0 in Gene0-targeted cells
     counts[100:200, 0] = 0.0
-
     obs = pd.DataFrame(
         {
             "target_gene": targets,
@@ -306,7 +239,6 @@ def _create_pipeline_synthetic_h5ad(tmp_path):
         },
         index=[f"cell_{i}" for i in range(n_cells)],
     )
-
     adata = ad.AnnData(X=sparse.csr_matrix(counts), obs=obs, var=var)
     h5ad_path = tmp_path / "synthetic_input.h5ad"
     adata.write_h5ad(h5ad_path)
@@ -319,7 +251,6 @@ def test_pipeline_run_with_distance_modules_disabled(tmp_path):
 
     h5ad_path = _create_pipeline_synthetic_h5ad(tmp_path)
     outdir = tmp_path / "out_disabled"
-
     cfg = Config.from_dict(
         {
             "run": {"name": "test_disabled", "outdir": str(outdir)},
@@ -337,7 +268,6 @@ def test_pipeline_run_with_distance_modules_disabled(tmp_path):
             "meta_analysis": {"enabled": False},
         }
     )
-
     result = run_pipeline(cfg)
     assert result.h5ad.exists()
     assert result.report.exists()
@@ -351,7 +281,6 @@ def test_pipeline_run_with_distance_only(tmp_path):
 
     h5ad_path = _create_pipeline_synthetic_h5ad(tmp_path)
     outdir = tmp_path / "out_dist_only"
-
     cfg = Config.from_dict(
         {
             "run": {"name": "test_dist_only", "outdir": str(outdir)},
@@ -369,7 +298,6 @@ def test_pipeline_run_with_distance_only(tmp_path):
             "meta_analysis": {"enabled": True},
         }
     )
-
     result = run_pipeline(cfg)
     assert result.h5ad.exists()
     assert result.report.exists()
@@ -384,7 +312,6 @@ def test_pipeline_run_with_distance_and_distance_space(tmp_path):
 
     h5ad_path = _create_pipeline_synthetic_h5ad(tmp_path)
     outdir = tmp_path / "out_full"
-
     cfg = Config.from_dict(
         {
             "run": {"name": "test_full", "outdir": str(outdir)},
@@ -402,11 +329,9 @@ def test_pipeline_run_with_distance_and_distance_space(tmp_path):
             "meta_analysis": {"enabled": True},
         }
     )
-
     result = run_pipeline(cfg)
     assert result.h5ad.exists()
     assert result.report.exists()
-
     tables_dir = outdir / "tables"
     assert (tables_dir / "perturbation_distance.csv").exists()
     assert (tables_dir / "perturbation_distance_matrix.tsv").exists()
@@ -414,6 +339,5 @@ def test_pipeline_run_with_distance_and_distance_space(tmp_path):
     assert (tables_dir / "perturbation_neighbors.csv").exists()
     assert (tables_dir / "phenotype_modules.csv").exists()
     assert (tables_dir / "perturbation_meta.csv").exists()
-
     # Verify H5AD is lean (does NOT contain full distance matrix in uns)
     assert "perturbation_distance_matrix" not in result.adata.uns

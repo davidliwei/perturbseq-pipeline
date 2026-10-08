@@ -57,7 +57,6 @@ def test_use_large_mode_auto_threshold_triggers():
     assert cfg.use_large_mode(1_000_000, n_perturbations=100)
     assert cfg.execution_mode(1_000_000, n_perturbations=100) == "large"
     assert not cfg.use_large_mode(999_999, n_perturbations=100)
-
     # Perturbations >= 5_000 (even with small cell count)
     assert cfg.use_large_mode(50_000, n_perturbations=5_000)
     assert cfg.execution_mode(50_000, n_perturbations=5_000) == "large"
@@ -103,7 +102,6 @@ scaling:
 """
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(yaml_content)
-
     cfg = Config.from_yaml(cfg_file)
     assert cfg.scaling.mode == "large"
     assert cfg.scaling.large_n_cells == 500_000
@@ -161,6 +159,5 @@ scaling:
 """
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(yaml_content)
-
     with pytest.raises(ValueError, match="Unknown config key.*non_existent_scaling_key"):
         Config.from_yaml(cfg_file)

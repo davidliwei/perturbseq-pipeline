@@ -40,7 +40,9 @@ def _norm(col: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(col).strip().lower()).strip("_")
 
 
-def _pick_column(columns: Sequence[str], explicit: Optional[str], candidates: Sequence[str], what: str, required: bool) -> Optional[str]:
+def _pick_column(
+    columns: Sequence[str], explicit: Optional[str], candidates: Sequence[str], what: str, required: bool
+) -> Optional[str]:
     if explicit is not None:
         if explicit in columns:
             return explicit
@@ -101,7 +103,6 @@ def load_guide_design(cfg: Config) -> pd.DataFrame:
     target_col = _pick_column(cols, dcfg.target_column, _TARGET_CANDIDATES, "target", True)
     id_col = _pick_column(cols, dcfg.guide_id_column, _ID_CANDIDATES, "guide_id", False)
     scaffold_col = _pick_column(cols, dcfg.scaffold_column, _SCAFFOLD_CANDIDATES, "scaffold", False)
-
     df = pd.DataFrame(index=raw.index)
     proto = raw[proto_col].astype(str).str.strip()
     if dcfg.uppercase:
@@ -118,7 +119,6 @@ def load_guide_design(cfg: Config) -> pd.DataFrame:
     df["is_control"] = is_control_label(df["target_raw"].tolist(), patterns)
     df["target"] = np.where(df["is_control"], CONTROL_TARGET_LABEL, df["target_raw"])
     df["design_index"] = np.arange(len(df), dtype=int)
-
     if id_col is not None:
         ids = raw[id_col].astype(str).str.strip()
     else:
@@ -133,15 +133,14 @@ def load_guide_design(cfg: Config) -> pd.DataFrame:
         dup = ids[ids.duplicated()].unique()[:5].tolist()
         raise ValueError(f"Guide ids are not unique in the design table (e.g. {dup}); set guides.design.id_format")
     df["guide_id"] = ids.to_numpy()
-
     dup_proto = df["protospacer"].duplicated(keep=False)
     if dup_proto.any():
         logger.warning(
             "%d protospacers are listed more than once in the design table; only the first "
-            "occurrence can be matched: %s", int(dup_proto.sum()),
+            "occurrence can be matched: %s",
+            int(dup_proto.sum()),
             df.loc[dup_proto, "protospacer"].unique()[:5].tolist(),
         )
-
     if scaffold_col is not None:
         df["scaffold"] = raw[scaffold_col].astype(str).str.strip().replace({"nan": "unknown", "": "unknown"}).to_numpy()
         df["scaffold_source"] = "design_table"
@@ -156,7 +155,6 @@ def load_guide_design(cfg: Config) -> pd.DataFrame:
         hit = df["protospacer"].map(mapping)
         df.loc[hit.notna(), "scaffold"] = hit[hit.notna()].to_numpy()
         df.loc[hit.notna(), "scaffold_source"] = "scaffold_table"
-
     # Keep the original columns for provenance.
     for c in cols:
         if c in (proto_col, target_col):
@@ -168,12 +166,17 @@ def load_guide_design(cfg: Config) -> pd.DataFrame:
         if vals.dtype == object:
             vals = vals.astype(str)
         df[name] = vals.to_numpy()
-
     df = df.reset_index(drop=True)
     logger.info(
         "Guide design: %d designed guides, %d targets (+%d control guides) from %s "
         "[protospacer=%r target=%r id=%s scaffold=%s]",
-        len(df), int(df.loc[~df["is_control"], "target"].nunique()), int(df["is_control"].sum()),
-        dcfg.path, proto_col, target_col, id_col or "synthetic", scaffold_col or "n/a",
+        len(df),
+        int(df.loc[~df["is_control"], "target"].nunique()),
+        int(df["is_control"].sum()),
+        dcfg.path,
+        proto_col,
+        target_col,
+        id_col or "synthetic",
+        scaffold_col or "n/a",
     )
     return df

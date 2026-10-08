@@ -33,9 +33,7 @@ from .guides import CLASS_NTC, CLASS_TARGETING, OBS_CLASS, OBS_TARGET
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Storage Mode Resolution & Diagnostics
-# ---------------------------------------------------------------------------
 
 
 def is_backed(expr: ad.AnnData) -> bool:
@@ -43,11 +41,7 @@ def is_backed(expr: ad.AnnData) -> bool:
     return bool(getattr(expr, "isbacked", False))
 
 
-def resolve_storage_mode(
-    cfg: Config,
-    n_cells: int = 0,
-    is_h5ad_input: bool = True,
-) -> str:
+def resolve_storage_mode(cfg: Config, n_cells: int = 0, is_h5ad_input: bool = True) -> str:
     """Determine effective storage access mode ('in_memory' or 'backed').
 
     Parameters
@@ -67,33 +61,19 @@ def resolve_storage_mode(
     mode = cfg.storage.mode.lower()
     if mode == "in_memory":
         return "in_memory"
-
     if mode == "backed":
         if is_h5ad_input:
             return "backed"
-        logger.warning(
-            "[storage] Backed storage requested but input is not an H5AD file; "
-            "using in-memory mode."
-        )
+        logger.warning("[storage] Backed storage requested but input is not an H5AD file; using in-memory mode.")
         return "in_memory"
-
     # AUTO mode
-    if (
-        is_h5ad_input
-        and cfg.storage.prefer_backed_h5ad
-        and n_cells >= cfg.storage.backed_threshold_cells
-    ):
+    if is_h5ad_input and cfg.storage.prefer_backed_h5ad and n_cells >= cfg.storage.backed_threshold_cells:
         return "backed"
-
     return "in_memory"
 
 
 def log_storage_diagnostics(
-    input_format: str,
-    access_mode: str,
-    n_cells: int,
-    n_vars: int,
-    is_backed_obj: bool = False,
+    input_format: str, access_mode: str, n_cells: int, n_vars: int, is_backed_obj: bool = False
 ) -> None:
     """Emit standardized concise runtime storage diagnostics."""
     logger.info(
@@ -106,16 +86,11 @@ def log_storage_diagnostics(
     )
 
 
-# ---------------------------------------------------------------------------
 # Representation / Embedding Access
-# ---------------------------------------------------------------------------
 
 
 def get_embedding(
-    expr: ad.AnnData,
-    rep_name: str = "X_pca",
-    cell_indices: Optional[np.ndarray] = None,
-    dtype: type = np.float32,
+    expr: ad.AnnData, rep_name: str = "X_pca", cell_indices: Optional[np.ndarray] = None, dtype: type = np.float32
 ) -> np.ndarray:
     """Extract a low-dimensional embedding matrix (e.g. X_pca) safely.
 
@@ -145,40 +120,26 @@ def get_embedding(
                 fallback = cand
                 break
         if fallback is not None:
-            logger.warning(
-                "[storage] Representation %r not found in obsm; using fallback %r",
-                rep_name,
-                fallback,
-            )
+            logger.warning("[storage] Representation %r not found in obsm; using fallback %r", rep_name, fallback)
             rep = expr.obsm[fallback]
         else:
             raise ValueError(
-                f"Requested representation {rep_name!r} not found in obsm "
-                f"(available: {sorted(expr.obsm.keys())})."
+                f"Requested representation {rep_name!r} not found in obsm (available: {sorted(expr.obsm.keys())})."
             )
-
     if sparse.issparse(rep):
         rep = rep.toarray()
-
     arr = np.asarray(rep, dtype=dtype)
-
     if cell_indices is not None:
         if len(cell_indices) == 0:
             return np.empty((0, arr.shape[1]), dtype=dtype)
         return arr[cell_indices]
-
     return arr
 
 
-# ---------------------------------------------------------------------------
 # Expression Layer & Gene Value Access
-# ---------------------------------------------------------------------------
 
 
-def get_layer(
-    expr: ad.AnnData,
-    layer_name: Optional[str] = LOGNORM_LAYER,
-) -> Any:
+def get_layer(expr: ad.AnnData, layer_name: Optional[str] = LOGNORM_LAYER) -> Any:
     """Retrieve expression layer, falling back to expr.X if absent."""
     if layer_name and layer_name in expr.layers:
         return expr.layers[layer_name]
@@ -217,13 +178,10 @@ def get_expression_vector(
     """
     if gene not in expr.var_names:
         raise KeyError(f"Gene {gene!r} not found in var_names.")
-
     gene_idx = expr.var_names.get_loc(gene)
     layer = get_layer(expr, layer_name)
-
     if cell_indices is not None and len(cell_indices) == 0:
         return np.empty(0, dtype=dtype)
-
     if cell_indices is not None:
         # Sliced extraction
         if sparse.issparse(layer):
@@ -241,7 +199,6 @@ def get_expression_vector(
         else:
             vals = layer[cell_indices, gene_idx]
             return np.asarray(vals, dtype=dtype).ravel()
-
     # All cells
     col = layer[:, gene_idx]
     if sparse.issparse(col):
@@ -249,9 +206,7 @@ def get_expression_vector(
     return np.asarray(col, dtype=dtype).ravel()
 
 
-# ---------------------------------------------------------------------------
 # Metadata & Target Mapping Access
-# ---------------------------------------------------------------------------
 
 
 def get_obs_column(expr: ad.AnnData, col_name: str) -> np.ndarray:
@@ -261,10 +216,7 @@ def get_obs_column(expr: ad.AnnData, col_name: str) -> np.ndarray:
     return expr.obs[col_name].to_numpy()
 
 
-def get_target_indices_map(
-    expr: ad.AnnData,
-    guide_class: str = CLASS_TARGETING,
-) -> Dict[str, np.ndarray]:
+def get_target_indices_map(expr: ad.AnnData, guide_class: str = CLASS_TARGETING) -> Dict[str, np.ndarray]:
     """Construct a map of {target_gene: np.ndarray[cell_indices]} once.
 
     Avoids allocating full boolean masks for every target gene repeatedly.
@@ -272,28 +224,16 @@ def get_target_indices_map(
     obs = expr.obs
     targets_col = obs[OBS_TARGET].astype(str).to_numpy()
     klass = obs[OBS_CLASS].astype(str).to_numpy()
-
     targeting_mask = (klass == guide_class) if guide_class else np.ones(len(klass), dtype=bool)
     targeting_indices = np.flatnonzero(targeting_mask)
-
-    df = pd.DataFrame(
-        {
-            "target": targets_col[targeting_indices],
-            "cell_idx": targeting_indices,
-        }
-    )
-
+    df = pd.DataFrame({"target": targets_col[targeting_indices], "cell_idx": targeting_indices})
     return {
         str(target): group["cell_idx"].to_numpy(dtype=np.int64, copy=True)
         for target, group in df.groupby("target", observed=True, sort=False)
     }
 
 
-def get_control_indices(
-    expr: ad.AnnData,
-    cfg: Config,
-    control_choice: str = "ntc",
-) -> np.ndarray:
+def get_control_indices(expr: ad.AnnData, cfg: Config, control_choice: str = "ntc") -> np.ndarray:
     """Retrieve 1D array of cell indices belonging to the specified control group."""
     klass = expr.obs[OBS_CLASS].astype(str).to_numpy()
     if control_choice == "ntc":
@@ -308,49 +248,31 @@ def get_control_indices(
         return np.flatnonzero(klass == CLASS_NTC).astype(np.int64)
 
 
-# ---------------------------------------------------------------------------
 # Shared Memory / Memmap Utilities for CPU Workers
-# ---------------------------------------------------------------------------
 
 
 class SharedArrayBuffer:
     """Memory-mapped or read-only shared array wrapper for zero-copy worker access."""
 
     def __init__(
-        self,
-        array: np.ndarray,
-        create_memmap: bool = True,
-        temp_dir: Optional[Union[str, Path]] = None,
+        self, array: np.ndarray, create_memmap: bool = True, temp_dir: Optional[Union[str, Path]] = None
     ) -> None:
         self.shape = array.shape
         self.dtype = array.dtype
         self._temp_file: Optional[Path] = None
         self._memmap: Optional[np.memmap] = None
-
         if create_memmap:
             fd, path_str = tempfile.mkstemp(
-                prefix="perturbseq_shm_",
-                suffix=".dat",
-                dir=str(temp_dir) if temp_dir else None,
+                prefix="perturbseq_shm_", suffix=".dat", dir=str(temp_dir) if temp_dir else None
             )
             os.close(fd)
             self._temp_file = Path(path_str)
-            mm = np.memmap(
-                self._temp_file,
-                dtype=self.dtype,
-                mode="w+",
-                shape=self.shape,
-            )
+            mm = np.memmap(self._temp_file, dtype=self.dtype, mode="w+", shape=self.shape)
             mm[:] = array[:]
             mm.flush()
             del mm
             # Reopen in read-only mode
-            self._memmap = np.memmap(
-                self._temp_file,
-                dtype=self.dtype,
-                mode="r",
-                shape=self.shape,
-            )
+            self._memmap = np.memmap(self._temp_file, dtype=self.dtype, mode="r", shape=self.shape)
             self.array: np.ndarray = self._memmap
         else:
             self.array = np.asarray(array)

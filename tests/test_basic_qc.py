@@ -39,9 +39,7 @@ from perturbseq_pipeline.guide_qc import attach_guide_counts, infer_scaffold_cla
 from perturbseq_pipeline.guide_counting import GuideCountResult  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
@@ -68,9 +66,7 @@ def _base_cfg(**over) -> Config:
     return Config.from_dict(data)
 
 
-# ---------------------------------------------------------------------------
 # 10x loader
-# ---------------------------------------------------------------------------
 
 
 def test_read_10x_h5_preserves_counts_barcodes_and_ids(dataset):
@@ -101,9 +97,7 @@ def test_obs_names_are_globally_unique_across_wells(dataset):
     assert combined.n_obs == a.n_obs + b.n_obs
 
 
-# ---------------------------------------------------------------------------
 # Configuration
-# ---------------------------------------------------------------------------
 
 
 def test_multi_sample_config_and_guide_pairing_parse(dataset, tmp_path):
@@ -144,9 +138,7 @@ def test_no_target_is_recognised_as_control_by_default():
     assert flags.tolist() == [True, True, False, True, True]
 
 
-# ---------------------------------------------------------------------------
 # Expression QC
-# ---------------------------------------------------------------------------
 
 
 def _toy_expr(n=200, seed=0):
@@ -165,7 +157,17 @@ def _toy_expr(n=200, seed=0):
 
 
 def test_qc_metrics_thresholds_and_flags_are_deterministic_and_do_not_subset():
-    cfg = _base_cfg(qc={"thresholds": {"method": "mad", "n_mads": 3, "min_genes_floor": 5, "min_counts_floor": 10, "max_pct_mt": 20.0}})
+    cfg = _base_cfg(
+        qc={
+            "thresholds": {
+                "method": "mad",
+                "n_mads": 3,
+                "min_genes_floor": 5,
+                "min_counts_floor": 10,
+                "max_pct_mt": 20.0,
+            }
+        }
+    )
     adata = _toy_expr()
     n0 = adata.n_obs
     qc_mod.compute_basic_qc_metrics(adata, cfg)
@@ -188,11 +190,19 @@ def test_qc_metrics_thresholds_and_flags_are_deterministic_and_do_not_subset():
 
 
 def test_fixed_method_condition_caps_and_overrides():
-    cfg = _base_cfg(qc={"thresholds": {
-        "method": "fixed", "min_genes_floor": 100, "min_counts_floor": 1000, "max_counts_ceiling": 50000,
-        "max_pct_mt": 20.0, "max_pct_mt_by_condition": {"COND2": 15.0},
-        "per_sample": {"S2": {"min_genes": 250}},
-    }})
+    cfg = _base_cfg(
+        qc={
+            "thresholds": {
+                "method": "fixed",
+                "min_genes_floor": 100,
+                "min_counts_floor": 1000,
+                "max_counts_ceiling": 50000,
+                "max_pct_mt": 20.0,
+                "max_pct_mt_by_condition": {"COND2": 15.0},
+                "per_sample": {"S2": {"min_genes": 250}},
+            }
+        }
+    )
     adata = _toy_expr()
     qc_mod.compute_basic_qc_metrics(adata, cfg)
     t = qc_mod.resolve_sample_thresholds(adata.obs, cfg, "S1", "COND1")
@@ -205,9 +215,7 @@ def test_fixed_method_condition_caps_and_overrides():
     assert adata.obs["gex_qc_pass"].all()
 
 
-# ---------------------------------------------------------------------------
 # Scrublet wrapper
-# ---------------------------------------------------------------------------
 
 
 def test_scrublet_wrapper_scores_flags_and_keeps_every_cell(dataset):
@@ -238,9 +246,7 @@ def test_scrublet_disabled_writes_neutral_columns():
     assert (~adata.obs["predicted_doublet"]).all() and adata.obs["doublet_score"].isna().all()
 
 
-# ---------------------------------------------------------------------------
 # Guide design
-# ---------------------------------------------------------------------------
 
 
 def test_guide_design_parser_keeps_all_designed_guides(dataset):
@@ -260,7 +266,9 @@ def test_guide_design_parser_keeps_all_designed_guides(dataset):
 
 def test_guide_design_explicit_columns_and_errors(tmp_path):
     p = tmp_path / "d.csv"
-    pd.DataFrame({"sgRNA": ["ACGT" * 5, "TTTT" * 5], "Target": ["G1", "ntc"], "scaffold": ["A", "C"]}).to_csv(p, index=False)
+    pd.DataFrame({"sgRNA": ["ACGT" * 5, "TTTT" * 5], "Target": ["G1", "ntc"], "scaffold": ["A", "C"]}).to_csv(
+        p, index=False
+    )
     cfg = _base_cfg(guides={"design": {"path": str(p), "protospacer_column": "sgRNA", "target_column": "Target"}})
     d = load_guide_design(cfg)
     assert d["scaffold"].tolist() == ["A", "C"] and d["is_control"].tolist() == [False, True]
@@ -270,9 +278,7 @@ def test_guide_design_explicit_columns_and_errors(tmp_path):
         load_guide_design(_base_cfg(guides={"design": {"path": str(bad)}}))
 
 
-# ---------------------------------------------------------------------------
 # Guide FASTQ parser
-# ---------------------------------------------------------------------------
 
 
 def _write_fastq(path: Path, seqs):
@@ -292,15 +298,15 @@ def test_guide_parser_handles_each_read_class(tmp_path):
     umi1, umi2, umi_n = "AAAAAAAAAAAA", "CCCCCCCCCCCC", "AAAAAAAAAAAN"
     A, C = SCAFFOLDS["A"], SCAFFOLDS["C"]
     reads = [
-        f"{bc_ok}{umi1}{TSO}GG{g1}{A}",      # valid guide 0, scaffold A
-        f"{bc_ok}{umi1}{TSO}GG{g1}{A}",      # duplicate UMI -> same molecule
-        f"{bc_ok}{umi2}{TSO}GGG{g1}{A}",     # different UMI -> second molecule (3 Gs)
-        f"{bc_ok}{umi1}{TSO}{g2}{C}",        # guide 1, scaffold C, zero Gs
+        f"{bc_ok}{umi1}{TSO}GG{g1}{A}",  # valid guide 0, scaffold A
+        f"{bc_ok}{umi1}{TSO}GG{g1}{A}",  # duplicate UMI -> same molecule
+        f"{bc_ok}{umi2}{TSO}GGG{g1}{A}",  # different UMI -> second molecule (3 Gs)
+        f"{bc_ok}{umi1}{TSO}{g2}{C}",  # guide 1, scaffold C, zero Gs
         f"{bc_ok}{umi1}{TSO}GG{'ACGT' * 5}{A}",  # unknown guide
-        f"{bc_bad}{umi1}{TSO}GG{g1}{A}",     # invalid barcode -> counted, not stored
-        f"{bc_ok}{umi_n}{TSO}GG{g2}{C}",     # bad UMI
-        "ACGT" * 37,                         # no anchor
-        f"{bc_ok}{umi2}{TSO}GG{g2}A{C}",     # 1-nt insertion before the anchor -> shifted exact match
+        f"{bc_bad}{umi1}{TSO}GG{g1}{A}",  # invalid barcode -> counted, not stored
+        f"{bc_ok}{umi_n}{TSO}GG{g2}{C}",  # bad UMI
+        "ACGT" * 37,  # no anchor
+        f"{bc_ok}{umi2}{TSO}GG{g2}A{C}",  # 1-nt insertion before the anchor -> shifted exact match
     ]
     reads = [r[:151].ljust(60, "A") for r in reads]
     p = tmp_path / "t_R1_.fastq.gz"
@@ -320,12 +326,10 @@ def test_guide_parser_handles_each_read_class(tmp_path):
     assert res["guide_reads"].tolist() == [4, 3]
     assert res["guide_scaffold_reads"].tolist() == [[4, 0], [0, 3]]
     assert list(res["unmatched"].values()) == [1]
-
     # position_shift = 0 disables the positional fallback
     spec0 = GuideReadSpec.from_config(Config.from_dict({"guides": {"fastq": {"position_shift": 0}}}).guides.fastq)
     res0 = count_fastq_file(str(p), spec0, exact, mm, {bc_ok.encode(): 0}, 2, decompressor="python")
     assert res0["stats"]["reads_spacer_matched"] == 6 and res0["codes"].size == 3
-
     # explicit 1-mismatch mode
     exact1, mm1 = build_protospacer_index([g1, g2], 1)
     assert g1[:-1].encode() + b"T" in mm1 if g1[-1] != "T" else True
@@ -370,37 +374,44 @@ def test_guide_counter_reproduces_synthetic_truth_and_writes_mtx(dataset, tmp_pa
     assert (d2.loc[seq_ok, "scaffold_source"] == "empirical").all()
 
 
-# ---------------------------------------------------------------------------
 # Guide multiplet logic
-# ---------------------------------------------------------------------------
 
 
 def _guide_fixture():
-    design = pd.DataFrame({
-        "guide_id": ["A1", "A2", "C1", "C2", "U1"],
-        "protospacer": ["AAAA", "AAAC", "CCCC", "CCCA", "GGGG"],
-        "target": ["G1", "G2", "G1", "control", "G3"],
-        "target_raw": ["G1", "G2", "G1", "NO-TARGET", "G3"],
-        "is_control": [False, False, False, True, False],
-        "scaffold": ["A", "A", "C", "C", "unknown"],
-        "scaffold_source": ["design_table"] * 5,
-        "design_index": range(5),
-    })
-    counts = np.array([
-        [10, 0, 8, 0, 0],   # clean: 1A + 1C
-        [10, 7, 8, 0, 0],   # 2 A -> multiplet
-        [10, 0, 0, 0, 0],   # single A guide -> detected, structure fail, not multiplet
-        [0, 0, 0, 0, 0],    # no guide
-        [2, 0, 1, 0, 0],    # sub-threshold only
-        [10, 0, 8, 9, 0],   # 2 C -> multiplet
-        [10, 0, 8, 0, 5],   # unknown-scaffold guide -> structure fail
-    ], dtype=np.int32)
+    design = pd.DataFrame(
+        {
+            "guide_id": ["A1", "A2", "C1", "C2", "U1"],
+            "protospacer": ["AAAA", "AAAC", "CCCC", "CCCA", "GGGG"],
+            "target": ["G1", "G2", "G1", "control", "G3"],
+            "target_raw": ["G1", "G2", "G1", "NO-TARGET", "G3"],
+            "is_control": [False, False, False, True, False],
+            "scaffold": ["A", "A", "C", "C", "unknown"],
+            "scaffold_source": ["design_table"] * 5,
+            "design_index": range(5),
+        }
+    )
+    counts = np.array(
+        [
+            [10, 0, 8, 0, 0],  # clean: 1A + 1C
+            [10, 7, 8, 0, 0],  # 2 A -> multiplet
+            [10, 0, 0, 0, 0],  # single A guide -> detected, structure fail, not multiplet
+            [0, 0, 0, 0, 0],  # no guide
+            [2, 0, 1, 0, 0],  # sub-threshold only
+            [10, 0, 8, 9, 0],  # 2 C -> multiplet
+            [10, 0, 8, 0, 5],  # unknown-scaffold guide -> structure fail
+        ],
+        dtype=np.int32,
+    )
     adata = ad.AnnData(sp.csr_matrix(np.ones((7, 3), dtype=np.int32)))
     adata.obs_names = [f"S_bc{i}-1" for i in range(7)]
     adata.obs["cell_barcode"] = [f"bc{i}-1" for i in range(7)]
     res = GuideCountResult(
-        sample_id="S", guide_ids=design["guide_id"].tolist(), cell_barcodes=[f"bc{i}" for i in range(7)],
-        counts=sp.csr_matrix(counts), guide_reads=np.zeros(5, int), guide_scaffold_reads=np.zeros((5, 2), int),
+        sample_id="S",
+        guide_ids=design["guide_id"].tolist(),
+        cell_barcodes=[f"bc{i}" for i in range(7)],
+        counts=sp.csr_matrix(counts),
+        guide_reads=np.zeros(5, int),
+        guide_scaffold_reads=np.zeros((5, 2), int),
         scaffold_names=["A", "C"],
     )
     return adata, res, design
@@ -438,9 +449,7 @@ def test_guide_multiplet_without_scaffold_classes_uses_expected_guides_per_cell(
     assert adata.n_obs == 7
 
 
-# ---------------------------------------------------------------------------
 # Synthetic two-well integration
-# ---------------------------------------------------------------------------
 
 
 def test_integration_outputs_exist(qc_run):
@@ -451,8 +460,16 @@ def test_integration_outputs_exist(qc_run):
     for w in ("W1", "W2"):
         assert b.per_sample_h5ads[w].is_file()
         assert (b.guide_count_dirs[w] / "matrix.mtx.gz").is_file()
-    for t in ("sample_qc_summary", "cell_qc_summary", "guide_qc_summary", "filtering_summary", "doublet_summary",
-              "qc_thresholds", "scrublet_vs_guide_multiplet", "guide_feature_table"):
+    for t in (
+        "sample_qc_summary",
+        "cell_qc_summary",
+        "guide_qc_summary",
+        "filtering_summary",
+        "doublet_summary",
+        "qc_thresholds",
+        "scrublet_vs_guide_multiplet",
+        "guide_feature_table",
+    ):
         assert b.tables[t].is_file(), t
     figs = list((qc_run["outdir"] / "figures").rglob("*.png"))
     assert len(figs) >= 10
@@ -469,11 +486,35 @@ def test_integration_all_cells_retained_with_flags_aligned(qc_run, dataset):
     assert allc.obs_names.is_unique and allc.var_names.is_unique
     assert np.issubdtype(allc.X.dtype, np.integer) and (allc.X != allc.layers["counts"]).nnz == 0
     assert set(allc.obs["sample_id"].astype(str)) == {"W1", "W2"}
-    for col in ("sample_id", "condition_code", "gem_well", "guide_library", "cell_barcode", "total_counts",
-                "n_genes_by_counts", "pct_counts_mt", "pct_counts_ribo", "qc_low_counts", "qc_high_counts",
-                "qc_low_genes", "qc_high_genes", "qc_high_mt", "gex_qc_pass", "doublet_score", "predicted_doublet",
-                "n_guides", "n_guides_A", "n_guides_C", "guide_umi_total", "guide_umi_A", "guide_umi_C",
-                "guide_detected", "guide_structure_pass", "guide_multiplet_flag", "perturbation_assignable"):
+    for col in (
+        "sample_id",
+        "condition_code",
+        "gem_well",
+        "guide_library",
+        "cell_barcode",
+        "total_counts",
+        "n_genes_by_counts",
+        "pct_counts_mt",
+        "pct_counts_ribo",
+        "qc_low_counts",
+        "qc_high_counts",
+        "qc_low_genes",
+        "qc_high_genes",
+        "qc_high_mt",
+        "gex_qc_pass",
+        "doublet_score",
+        "predicted_doublet",
+        "n_guides",
+        "n_guides_A",
+        "n_guides_C",
+        "guide_umi_total",
+        "guide_umi_A",
+        "guide_umi_C",
+        "guide_detected",
+        "guide_structure_pass",
+        "guide_multiplet_flag",
+        "perturbation_assignable",
+    ):
         assert col in allc.obs.columns, col
     for col in ("gene_ids", "feature_types", "mt", "ribo"):
         assert col in allc.var.columns
@@ -564,13 +605,15 @@ def test_gex_only_sample_runs_without_guides(dataset, tmp_path):
     from perturbseq_pipeline.cli import run_pipeline
 
     info = dataset["wells"]["W1"]
-    cfg = Config.from_dict({
-        "run": {"name": "gex_only", "outdir": str(tmp_path / "out"), "stop_after": "qc"},
-        "samples": {"W1": {"gex_h5": str(info["h5"]), "condition_code": "C"}},
-        "qc": {"thresholds": {"min_genes_floor": 50, "min_counts_floor": 200}, "doublets": {"threshold": 0.15}},
-        "output": {"h5ad_name": "gex_only_qc.h5ad"},
-        "report": {"figure_dpi": 50},
-    })
+    cfg = Config.from_dict(
+        {
+            "run": {"name": "gex_only", "outdir": str(tmp_path / "out"), "stop_after": "qc"},
+            "samples": {"W1": {"gex_h5": str(info["h5"]), "condition_code": "C"}},
+            "qc": {"thresholds": {"min_genes_floor": 50, "min_counts_floor": 200}, "doublets": {"threshold": 0.15}},
+            "output": {"h5ad_name": "gex_only_qc.h5ad"},
+            "report": {"figure_dpi": 50},
+        }
+    )
     cfg.validate()
     r = run_pipeline(cfg)
     a = ad.read_h5ad(r.unfiltered_h5ad)
@@ -587,17 +630,25 @@ def test_precomputed_guide_matrix_source(dataset, tmp_path, qc_run):
 
     b = qc_run["result"].basic_qc
     info = dataset["wells"]["W1"]
-    cfg = Config.from_dict({
-        "run": {"name": "matrix_in", "outdir": str(tmp_path / "out"), "stop_after": "qc"},
-        "samples": {"W1": {"gex_h5": str(info["h5"]), "guide_matrix": str(b.guide_count_dirs["W1"]), "guide_library": "W1F"}},
-        # the counter's guide summary doubles as a protospacer -> scaffold table
-        "guides": {"design": {"path": str(dataset["design_path"]),
-                              "scaffold_table": str(b.guide_count_dirs["W1"] / "W1_guide_summary.tsv")},
-                   "detection_threshold": 3},
-        "qc": {"thresholds": {"min_genes_floor": 50, "min_counts_floor": 200}, "doublets": {"enabled": False}},
-        "output": {"h5ad_name": "m.h5ad"},
-        "report": {"figure_dpi": 50},
-    })
+    cfg = Config.from_dict(
+        {
+            "run": {"name": "matrix_in", "outdir": str(tmp_path / "out"), "stop_after": "qc"},
+            "samples": {
+                "W1": {"gex_h5": str(info["h5"]), "guide_matrix": str(b.guide_count_dirs["W1"]), "guide_library": "W1F"}
+            },
+            # the counter's guide summary doubles as a protospacer -> scaffold table
+            "guides": {
+                "design": {
+                    "path": str(dataset["design_path"]),
+                    "scaffold_table": str(b.guide_count_dirs["W1"] / "W1_guide_summary.tsv"),
+                },
+                "detection_threshold": 3,
+            },
+            "qc": {"thresholds": {"min_genes_floor": 50, "min_counts_floor": 200}, "doublets": {"enabled": False}},
+            "output": {"h5ad_name": "m.h5ad"},
+            "report": {"figure_dpi": 50},
+        }
+    )
     cfg.validate()
     r = run_pipeline(cfg)
     a = ad.read_h5ad(r.unfiltered_h5ad)
@@ -610,9 +661,7 @@ def test_precomputed_guide_matrix_source(dataset, tmp_path, qc_run):
     assert set(a.uns["guide_features"]["scaffold_source"]) <= {"scaffold_table", "unspecified"}
 
 
-# ---------------------------------------------------------------------------
 # Depth-aware detection rule, sensitivity table, threshold plausibility
-# ---------------------------------------------------------------------------
 
 
 def test_relative_detection_rule_and_sensitivity_table():
@@ -627,7 +676,15 @@ def test_relative_detection_rule_and_sensitivity_table():
     cfg = Config.from_dict({"guides": {"detection_threshold": 3, "multiplet": {"detection_min_fraction_of_top": 0.75}}})
     attach_guide_counts(adata, res, design, cfg)
     assert adata.obs["n_guides"].tolist() == [2, 2, 1, 0, 0, 3, 2]
-    assert adata.obs["guide_structure_pass"].tolist() == [True, True, False, False, False, False, True]  # cell 1: A2 (7) drops below 7.5
+    assert adata.obs["guide_structure_pass"].tolist() == [
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]  # cell 1: A2 (7) drops below 7.5
     assert adata.obs["guide_multiplet_flag"].tolist() == [False, False, False, False, False, True, False]
     assert adata.n_obs == 7
     table = guide_detection_sensitivity(counts, design, cfg, "S")

@@ -55,9 +55,7 @@ class LoadedData:
         return len(self.lanes)
 
 
-# ---------------------------------------------------------------------------
 # Public entry point
-# ---------------------------------------------------------------------------
 
 
 def load_data(cfg: Config) -> LoadedData:
@@ -67,13 +65,11 @@ def load_data(cfg: Config) -> LoadedData:
     data = _load_mtx(cfg) if mode == "mtx" else _load_h5ad(cfg)
     if mode == "h5ad":
         data.expr = apply_layer_choices(data.expr, cfg)
-
     data.expr = attach_sample_metadata(data.expr, cfg, n_lanes=data.n_lanes)
     if data.guides is not None:
         shared = [c for c in data.expr.obs.columns if c not in data.guides.obs.columns]
         for col in shared:
             data.guides.obs[col] = data.expr.obs[col].reindex(data.guides.obs_names)
-
     logger.info(
         "Loaded %d cells x %d genes (%s guide features) from %d lane(s)",
         data.expr.n_obs,
@@ -84,9 +80,7 @@ def load_data(cfg: Config) -> LoadedData:
     return data
 
 
-# ---------------------------------------------------------------------------
 # 10x MTX mode
-# ---------------------------------------------------------------------------
 
 
 def _load_mtx(cfg: Config) -> LoadedData:
@@ -94,9 +88,7 @@ def _load_mtx(cfg: Config) -> LoadedData:
     lanes = cfg.input.resolved_mtx_dirs()
     if not lanes:
         raise ValueError("input.mtx_dirs is empty")
-
     guide_dirs = cfg.input.guide_mtx_dirs or {}
-
     per_lane = []
     per_lane_guides = []
     for lane_id, path in lanes.items():
@@ -105,58 +97,34 @@ def _load_mtx(cfg: Config) -> LoadedData:
             raise FileNotFoundError(f"MTX directory for lane {lane_id!r} not found: {p}")
         _check_mtx_dir(p, lane_id)
         logger.info("Reading lane %s from %s", lane_id, p)
-        a = sc.read_10x_mtx(
-            p,
-            var_names=cfg.input.var_names,
-            cache=cfg.input.cache_mtx,
-            gex_only=False,
-        )
+        a = sc.read_10x_mtx(p, var_names=cfg.input.var_names, cache=cfg.input.cache_mtx, gex_only=False)
         a.var_names_make_unique()
-
         if guide_dirs:
             g = _read_guide_mtx(Path(guide_dirs[lane_id]), lane_id, a.obs_names, cfg)
             per_lane_guides.append(g)
         per_lane.append(a)
-
     if len(per_lane) == 1:
         adata = per_lane[0]
         adata.obs[LANE_KEY] = pd.Categorical([next(iter(lanes))] * adata.n_obs)
         guides_all = per_lane_guides[0] if per_lane_guides else None
         if guides_all is not None:
-            guides_all.obs[LANE_KEY] = pd.Categorical(
-                [next(iter(lanes))] * guides_all.n_obs
-            )
+            guides_all.obs[LANE_KEY] = pd.Categorical([next(iter(lanes))] * guides_all.n_obs)
     else:
         _check_matching_vars(per_lane, list(lanes))
         var_backup = per_lane[0].var.copy()
-        adata = sc.concat(
-            per_lane,
-            label=LANE_KEY,
-            keys=list(lanes),
-            index_unique="-",
-            merge="same",
-        )
+        adata = sc.concat(per_lane, label=LANE_KEY, keys=list(lanes), index_unique="-", merge="same")
         # ``sc.concat`` keeps only columns identical across objects; restoring
         # from lane 1 guarantees feature_types/gene_ids survive.
         adata.var = var_backup.loc[adata.var_names]
-
         guides_all = None
         if per_lane_guides:
             _check_matching_vars(per_lane_guides, list(lanes))
             gvar_backup = per_lane_guides[0].var.copy()
             # Same keys and index_unique as above, so guide obs_names line up
             # cell-for-cell with the expression matrix.
-            guides_all = sc.concat(
-                per_lane_guides,
-                label=LANE_KEY,
-                keys=list(lanes),
-                index_unique="-",
-                merge="same",
-            )
+            guides_all = sc.concat(per_lane_guides, label=LANE_KEY, keys=list(lanes), index_unique="-", merge="same")
             guides_all.var = gvar_backup.loc[guides_all.var_names]
-
     adata.var_names_make_unique()
-
     if cfg.input.cell_id_format == "prefix":
         # ``<lane>_<barcode>``: identical for single-lane and combined runs, so a
         # per-lane object is an exact row subset of the combined object.
@@ -166,7 +134,10 @@ def _load_mtx(cfg: Config) -> LoadedData:
             bare = adata.obs_names.to_numpy().astype(str)
         else:
             # strip the "-<lane>" suffix appended by sc.concat(index_unique="-")
-            bare = np.array([n[: -(len(l) + 1)] if n.endswith("-" + l) else n for n, l in zip(adata.obs_names, lane_of)], dtype=object)
+            bare = np.array(
+                [n[: -(len(l) + 1)] if n.endswith("-" + l) else n for n, l in zip(adata.obs_names, lane_of)],
+                dtype=object,
+            )
         new_names = pd.Index([f"{l}_{b}" for l, b in zip(lane_of, bare)])
         if not new_names.is_unique:
             raise ValueError("input.cell_id_format=prefix produced non-unique cell ids")
@@ -176,28 +147,18 @@ def _load_mtx(cfg: Config) -> LoadedData:
         if guides_all is not None:
             guides_all.obs_names = pd.Index([rename[n] for n in guides_all.obs_names])
         logger.info("Cell ids use the '<lane>_<barcode>' prefix format (e.g. %s)", new_names[0])
-
     if guides_all is not None:
         # Expression and guides came from separate quantifications; nothing was
         # split, so this path never calls split_features.
         _ensure_counts_layer(adata)
         guides_all = guides_all[adata.obs_names].copy()
-        logger.info(
-            "Separate guide quantification: %d cells x %d guides",
-            guides_all.n_obs,
-            guides_all.n_vars,
-        )
-        return LoadedData(
-            expr=adata, guides=guides_all, guide_source="matrix", lanes=dict(lanes)
-        )
-
+        logger.info("Separate guide quantification: %d cells x %d guides", guides_all.n_obs, guides_all.n_vars)
+        return LoadedData(expr=adata, guides=guides_all, guide_source="matrix", lanes=dict(lanes))
     expr, guides = split_features(adata, cfg)
     return LoadedData(expr=expr, guides=guides, guide_source="matrix", lanes=dict(lanes))
 
 
-def _read_guide_mtx(
-    path: Path, lane_id: str, cell_names: pd.Index, cfg: Config
-) -> ad.AnnData:
+def _read_guide_mtx(path: Path, lane_id: str, cell_names: pd.Index, cfg: Config) -> ad.AnnData:
     """Read a companion guide-count MTX directory and align it to the cells.
 
     STARsolo-style runs quantify guides separately from gene expression, and the
@@ -207,16 +168,11 @@ def _read_guide_mtx(
     overlap is an error rather than a silently empty guide matrix.
     """
     if not path.is_dir():
-        raise FileNotFoundError(
-            f"Guide MTX directory for lane {lane_id!r} not found: {path}"
-        )
+        raise FileNotFoundError(f"Guide MTX directory for lane {lane_id!r} not found: {path}")
     _check_mtx_dir(path, f"{lane_id} (guides)")
     logger.info("Reading guide counts for lane %s from %s", lane_id, path)
-    g = sc.read_10x_mtx(
-        path, var_names="gene_ids", cache=cfg.input.cache_mtx, gex_only=False
-    )
+    g = sc.read_10x_mtx(path, var_names="gene_ids", cache=cfg.input.cache_mtx, gex_only=False)
     g.var_names_make_unique()
-
     shared = cell_names.intersection(g.obs_names)
     if len(shared) == 0:
         # Reconcile the 10x "-<gem group>" suffix: separate quantifications often
@@ -232,7 +188,8 @@ def _read_guide_mtx(
             shared = cell_names.intersection(g.obs_names)
             logger.info(
                 "Lane %s: guide barcodes matched the expression barcodes after reconciling the '-<n>' suffix (%d shared)",
-                lane_id, len(shared),
+                lane_id,
+                len(shared),
             )
     if len(shared) == 0:
         raise ValueError(
@@ -243,8 +200,7 @@ def _read_guide_mtx(
         )
     if len(shared) < len(cell_names):
         logger.warning(
-            "Lane %s: only %d of %d cells have guide counts; the rest will be "
-            "unassigned.",
+            "Lane %s: only %d of %d cells have guide counts; the rest will be unassigned.",
             lane_id,
             len(shared),
             len(cell_names),
@@ -260,25 +216,17 @@ def _read_guide_mtx(
     out = ad.AnnData(X=matrix, var=g.var.copy())
     out.obs_names = cell_names
     out.var_names = g.var_names
-    logger.info(
-        "Lane %s: %d/%d cells matched a guide barcode", lane_id, int(found.sum()),
-        len(cell_names),
-    )
+    logger.info("Lane %s: %d/%d cells matched a guide barcode", lane_id, int(found.sum()), len(cell_names))
     return out
 
 
 def _check_mtx_dir(path: Path, lane_id: str) -> None:
     """Fail early with a readable message when a 10x directory is incomplete."""
     required = ("barcodes.tsv", "features.tsv", "matrix.mtx")
-    missing = [
-        stem
-        for stem in required
-        if not (path / stem).is_file() and not (path / f"{stem}.gz").is_file()
-    ]
+    missing = [stem for stem in required if not (path / stem).is_file() and not (path / f"{stem}.gz").is_file()]
     if missing:
         raise FileNotFoundError(
-            f"Lane {lane_id!r} at {path} is not a 10x MTX directory; "
-            f"missing {missing} (with or without .gz)."
+            f"Lane {lane_id!r} at {path} is not a 10x MTX directory; missing {missing} (with or without .gz)."
         )
 
 
@@ -294,9 +242,7 @@ def _check_matching_vars(objs, lane_ids) -> None:
             )
 
 
-# ---------------------------------------------------------------------------
 # h5ad mode
-# ---------------------------------------------------------------------------
 
 
 def _load_h5ad(cfg: Config) -> LoadedData:
@@ -314,25 +260,17 @@ def _load_h5ad(cfg: Config) -> LoadedData:
     logger.info("Reading %s", path)
     adata = sc.read_h5ad(path)
     adata.var_names_make_unique()
-
     lanes = _lanes_from_obs(adata, cfg)
-
     merged = guides_from_obsm(adata, cfg)
     if merged is not None:
         _ensure_counts_layer(adata)
         return LoadedData(adata, merged, "matrix", lanes)
-
     ftype_col = cfg.input.feature_type_column
-    has_guide_vars = (
-        ftype_col in adata.var.columns
-        and adata.var[ftype_col].isin(cfg.input.guide_feature_types).any()
-    )
-
+    has_guide_vars = ftype_col in adata.var.columns and adata.var[ftype_col].isin(cfg.input.guide_feature_types).any()
     if has_guide_vars:
         logger.info("Guide features found in var['%s']", ftype_col)
         expr, guides = split_features(adata, cfg)
         return LoadedData(expr, guides, "matrix", lanes)
-
     if cfg.input.guide_h5ad:
         gpath = Path(cfg.input.guide_h5ad)
         if not gpath.is_file():
@@ -357,29 +295,23 @@ def _load_h5ad(cfg: Config) -> LoadedData:
         guides = guides[shared].copy()
         _ensure_counts_layer(expr)
         return LoadedData(expr, guides, "matrix", lanes)
-
     if cfg.input.guide_table:
         labels = read_guide_table(
-            cfg,
-            adata.obs_names,
-            adata.obs[LANE_KEY].astype(str) if LANE_KEY in adata.obs else None,
+            cfg, adata.obs_names, adata.obs[LANE_KEY].astype(str) if LANE_KEY in adata.obs else None
         )
         adata.obs[RAW_GUIDE_LABEL] = labels.to_numpy()
         _ensure_counts_layer(adata)
         return LoadedData(adata, None, "obs_label", lanes)
-
     col = cfg.input.guide_obs_column
     if col:
         if col not in adata.obs.columns:
             raise ValueError(
-                f"input.guide_obs_column={col!r} is not a column of obs. "
-                f"Available: {sorted(adata.obs.columns)[:30]}"
+                f"input.guide_obs_column={col!r} is not a column of obs. Available: {sorted(adata.obs.columns)[:30]}"
             )
         logger.info("Using pre-computed per-cell guide labels from obs['%s']", col)
         adata.obs[RAW_GUIDE_LABEL] = adata.obs[col].astype(str)
         _ensure_counts_layer(adata)
         return LoadedData(adata, None, "obs_label", lanes)
-
     raise ValueError(
         "Could not find guide information in the h5ad. Provide one of:\n"
         f"  * guide features in var['{ftype_col}'] "
@@ -398,30 +330,22 @@ def _lanes_from_obs(adata: ad.AnnData, cfg: Config) -> Dict[str, str]:
     """
     src = str(cfg.input.h5ad)
     candidates = [
-        c
-        for c in (LANE_KEY, cfg.metadata.key_column, "sample", "orig.ident", "group")
-        if c in adata.obs.columns
+        c for c in (LANE_KEY, cfg.metadata.key_column, "sample", "orig.ident", "group") if c in adata.obs.columns
     ]
     # Prefer a column that actually distinguishes lanes; Seurat exports often
     # carry a constant 'orig.ident' alongside an informative 'group'.
-    chosen = next(
-        (c for c in candidates if adata.obs[c].nunique() > 1),
-        candidates[0] if candidates else None,
-    )
+    chosen = next((c for c in candidates if adata.obs[c].nunique() > 1), candidates[0] if candidates else None)
     if chosen is not None:
         values = adata.obs[chosen].astype(str)
         if chosen != LANE_KEY:
             logger.info("Using obs[%r] as the lane identifier", chosen)
             adata.obs[LANE_KEY] = pd.Categorical(values)
         return {lane: src for lane in sorted(values.unique())}
-
     adata.obs[LANE_KEY] = pd.Categorical([cfg.run.name] * adata.n_obs)
     return {cfg.run.name: src}
 
 
-# ---------------------------------------------------------------------------
 # Shared helpers
-# ---------------------------------------------------------------------------
 
 
 def split_features(adata: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, ad.AnnData]:
@@ -438,25 +362,20 @@ def split_features(adata: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, ad.AnnDa
             "cannot be separated. Set input.feature_type_column, or use "
             "input.guide_h5ad / input.guide_obs_column."
         )
-
     types = adata.var[col].astype(str)
     is_guide = types.isin(cfg.input.guide_feature_types).to_numpy()
     is_gex = (types == cfg.input.gex_feature_type).to_numpy()
-
     if not is_gex.any():
         raise ValueError(
-            f"No features of type {cfg.input.gex_feature_type!r} found. "
-            f"Present types: {sorted(types.unique())}"
+            f"No features of type {cfg.input.gex_feature_type!r} found. Present types: {sorted(types.unique())}"
         )
     if not is_guide.any():
         raise ValueError(
             f"No guide features found (looked for {cfg.input.guide_feature_types}). "
             f"Present types: {sorted(types.unique())}"
         )
-
     expr = adata[:, is_gex].copy()
     guides = adata[:, is_guide].copy()
-
     if "gene_ids" in guides.var.columns:
         guides.var["guide_id"] = guides.var["gene_ids"].astype(str)
         guides.var["guide_symbol"] = guides.var_names.astype(str)
@@ -464,11 +383,8 @@ def split_features(adata: ad.AnnData, cfg: Config) -> Tuple[ad.AnnData, ad.AnnDa
         guides.var_names_make_unique()
     else:
         guides.var["guide_id"] = guides.var_names.astype(str)
-
     _ensure_counts_layer(expr)
-    logger.info(
-        "Split features: %d gene-expression, %d guide", expr.n_vars, guides.n_vars
-    )
+    logger.info("Split features: %d gene-expression, %d guide", expr.n_vars, guides.n_vars)
     return expr, guides
 
 
@@ -487,18 +403,15 @@ def apply_layer_choices(adata: ad.AnnData, cfg: Config) -> ad.AnnData:
     """
     counts_layer = cfg.input.counts_layer
     norm_layer = cfg.input.normalized_layer
-
     if counts_layer:
         if counts_layer not in adata.layers:
             raise ValueError(
-                f"input.counts_layer={counts_layer!r} not found. "
-                f"Available layers: {sorted(adata.layers.keys())}"
+                f"input.counts_layer={counts_layer!r} not found. Available layers: {sorted(adata.layers.keys())}"
             )
         adata.layers["counts"] = adata.layers[counts_layer].copy()
         logger.info("Using layer %r as raw counts", counts_layer)
     else:
         _ensure_counts_layer(adata)
-
     if norm_layer:
         if norm_layer == "X":
             # Shared/subset objects often carry only normalized values, with no
@@ -520,13 +433,10 @@ def apply_layer_choices(adata: ad.AnnData, cfg: Config) -> ad.AnnData:
         else:
             adata.layers["lognorm"] = adata.layers[norm_layer].copy()
             logger.info("Using layer %r as log-normalized expression", norm_layer)
-
     return adata
 
 
-def attach_sample_metadata(
-    adata: ad.AnnData, cfg: Config, n_lanes: int
-) -> ad.AnnData:
+def attach_sample_metadata(adata: ad.AnnData, cfg: Config, n_lanes: int) -> ad.AnnData:
     """Merge the per-lane sample metadata table into ``adata.obs``.
 
     A metadata file is mandatory for multi-lane runs (``metadata.file``); for a
@@ -536,7 +446,6 @@ def attach_sample_metadata(
     pipeline wrote should not demand the metadata file a second time.
     """
     lanes_present = sorted(adata.obs[LANE_KEY].astype(str).unique())
-
     if not cfg.metadata.file:
         already_annotated = "sample_id" in adata.obs.columns
         if n_lanes > 1 and cfg.metadata.require_for_multilane and not already_annotated:
@@ -547,18 +456,13 @@ def attach_sample_metadata(
                 "metadata.require_for_multilane: false to proceed without it."
             )
         if already_annotated:
-            logger.info(
-                "No metadata file given, but the input already carries sample "
-                "annotation in obs; keeping it."
-            )
+            logger.info("No metadata file given, but the input already carries sample annotation in obs; keeping it.")
             return adata
         logger.info("No sample metadata file; using lane IDs only.")
         adata.obs["sample_id"] = adata.obs[LANE_KEY].astype(str)
         return adata
-
     meta = read_sample_metadata(cfg.metadata.file, cfg.metadata.key_column)
     key = cfg.metadata.key_column
-
     meta_lanes = set(meta[key].astype(str))
     missing = [l for l in lanes_present if l not in meta_lanes]
     if missing:
@@ -570,7 +474,6 @@ def attach_sample_metadata(
     unused = sorted(meta_lanes - set(lanes_present))
     if unused:
         logger.warning("Sample metadata has unused lane row(s): %s", unused)
-
     meta = meta.set_index(meta[key].astype(str))
     new_cols = [c for c in meta.columns if c != key]
     lane_values = adata.obs[LANE_KEY].astype(str)
@@ -578,24 +481,15 @@ def attach_sample_metadata(
         mapped = lane_values.map(meta[c])
         target = c if c not in adata.obs.columns else f"{c}_meta"
         if target != c:
-            logger.warning(
-                "obs already has column %r; metadata column stored as %r", c, target
-            )
-        adata.obs[target] = (
-            pd.Categorical(mapped.astype(str))
-            if mapped.dtype == object
-            else mapped.to_numpy()
-        )
-
+            logger.warning("obs already has column %r; metadata column stored as %r", c, target)
+        adata.obs[target] = pd.Categorical(mapped.astype(str)) if mapped.dtype == object else mapped.to_numpy()
     if "sample_id" not in adata.obs.columns:
         adata.obs["sample_id"] = adata.obs[LANE_KEY].astype(str)
     logger.info("Merged %d metadata column(s): %s", len(new_cols), new_cols)
     return adata
 
 
-def read_guide_table(
-    cfg: Config, obs_names: pd.Index, lanes: Optional[Sequence[str]] = None
-) -> pd.Series:
+def read_guide_table(cfg: Config, obs_names: pd.Index, lanes: Optional[Sequence[str]] = None) -> pd.Series:
     """Resolve a barcode -> guide table into one label per cell.
 
     This is the layout used by PS_python's demo (``BARCODE_10x_Merged.txt``):
@@ -612,7 +506,6 @@ def read_guide_table(
     path = Path(icfg.guide_table)
     if not path.is_file():
         raise FileNotFoundError(f"input.guide_table not found: {path}")
-
     sep = "\t" if path.suffix.lower() in (".tsv", ".txt", ".tab") else ","
     table = pd.read_csv(path, sep=sep)
     cell_col, gene_col = icfg.guide_table_cell_column, icfg.guide_table_gene_column
@@ -623,23 +516,16 @@ def read_guide_table(
                 f"(columns: {list(table.columns)}). Set "
                 "input.guide_table_cell_column / _gene_column to match."
             )
-
     raw_cells = table[cell_col].astype(str)
-    stripped = (
-        raw_cells.str.rsplit("_", n=1).str[-1]
-        if icfg.guide_table_strip_prefix
-        else raw_cells
-    )
+    stripped = raw_cells.str.rsplit("_", n=1).str[-1] if icfg.guide_table_strip_prefix else raw_cells
     # Group on the FULL cell id. The same 10x barcode legitimately occurs in
     # every lane, so grouping on the prefix-stripped barcode would merge one
     # cell per lane into a single pseudo-cell and make them all look like
     # multiplets. Stripped forms are only used as a matching fallback below,
     # and only when they are unambiguous.
     table = table.assign(_cell=raw_cells, _stripped=stripped)
-
     count_col = icfg.guide_table_count_column
     has_counts = bool(count_col) and count_col in table.columns
-
     gcfg = cfg.guides
     labels: Dict[str, str] = {}
     if has_counts:
@@ -648,11 +534,7 @@ def read_guide_table(
             counts = rows[count_col].to_numpy(dtype=float)
             top = float(counts[0])
             second = float(counts[1]) if len(counts) > 1 else 0.0
-            gate_ok = (
-                gcfg.max_second_umi is None
-                or gcfg.max_second_umi < 0
-                or second <= gcfg.max_second_umi
-            )
+            gate_ok = gcfg.max_second_umi is None or gcfg.max_second_umi < 0 or second <= gcfg.max_second_umi
             if top < max(gcfg.min_umi, 1):
                 labels[cell_id] = gcfg.unassigned_label
             elif top > gcfg.dominance_ratio * second and gate_ok:
@@ -668,7 +550,6 @@ def read_guide_table(
         for cell_id, rows in table.groupby("_cell", sort=False):
             genes = set(rows[gene_col].astype(str))
             labels[cell_id] = genes.pop() if len(genes) == 1 else gcfg.ambiguous_label
-
     # Add stripped-form keys only where they are unique, so a fallback match can
     # never silently pick the wrong lane's cell.
     counts_per_stripped = table.groupby("_stripped")["_cell"].nunique()
@@ -676,7 +557,6 @@ def read_guide_table(
     for cell_id, strip in table[["_cell", "_stripped"]].drop_duplicates().itertuples(index=False):
         if strip in unique_stripped and strip not in labels:
             labels[strip] = labels[cell_id]
-
     # Barcodes are spelled differently on the two sides: a table carries a
     # library prefix ('S1L1_AAACCC-1') while ``sc.concat`` appends a lane suffix
     # to the matrix ('AAACCC-1-S1L1'). Both spellings, and the bare barcode, are
@@ -705,7 +585,6 @@ def read_guide_table(
                 label = labels[key]
                 break
         resolved.append(label)
-
     out = pd.Series(resolved, index=obs_names)
     matched = int((out != gcfg.unassigned_label).sum())
     if matched == 0:
@@ -714,18 +593,11 @@ def read_guide_table(
             f"{obs_names[0]!r}; example table barcode: {raw_cells.iloc[0]!r}. "
             "Check input.guide_table_strip_prefix."
         )
-    logger.info(
-        "Guide table: %d/%d cells assigned a label from %s",
-        matched,
-        len(obs_names),
-        path.name,
-    )
+    logger.info("Guide table: %d/%d cells assigned a label from %s", matched, len(obs_names), path.name)
     return out
 
 
-def write_guide_table(
-    guides: ad.AnnData, expr: ad.AnnData, cfg: Config, path: Path
-) -> Optional[Path]:
+def write_guide_table(guides: ad.AnnData, expr: ad.AnnData, cfg: Config, path: Path) -> Optional[Path]:
     """Export the guide count matrix as a long barcode -> guide table.
 
     This reproduces the layout of PS_python's ``BARCODE_10x_Merged.txt``, which
@@ -751,7 +623,6 @@ def write_guide_table(
 
     if not cfg.output.write_guide_table or guides is None:
         return None
-
     from scipy import sparse
 
     X = guides.layers["counts"] if "counts" in guides.layers else guides.X
@@ -762,32 +633,22 @@ def write_guide_table(
     if X.nnz == 0:
         logger.warning("No guide counts survive the %d-UMI threshold", min_umi)
         return None
-
     coo = X.tocoo()
     guide_ids = guides.var_names.to_numpy().astype(str)
     if "target_gene" in guides.var.columns:
         targets = guides.var["target_gene"].to_numpy().astype(str)
     else:
         targets = parse_target_genes(guide_ids, cfg.guides)
-
     barcodes = guides.obs_names.to_numpy().astype(str)
     if LANE_KEY in guides.obs.columns:
         lanes = guides.obs[LANE_KEY].astype(str).to_numpy()
         # ``sc.concat`` appends '-<lane>' to make barcodes unique across lanes.
         # Strip it before re-prefixing, so the result is '<lane>_<barcode>' as
         # in PS_python's file rather than a doubled-up identifier.
-        stripped = np.array(
-            [
-                b[: -(len(l) + 1)] if b.endswith(f"-{l}") else b
-                for b, l in zip(barcodes, lanes)
-            ]
-        )
-        cells = np.array(
-            [f"{l}_{b}" for l, b in zip(lanes[coo.row], stripped[coo.row])]
-        )
+        stripped = np.array([b[: -(len(l) + 1)] if b.endswith(f"-{l}") else b for b, l in zip(barcodes, lanes)])
+        cells = np.array([f"{l}_{b}" for l, b in zip(lanes[coo.row], stripped[coo.row])])
     else:
         cells = barcodes[coo.row]
-
     counts = coo.data.astype(int)
     table = pd.DataFrame(
         {
@@ -798,17 +659,14 @@ def write_guide_table(
             "umi_count": counts,
         }
     )
-
     assignment = (
         expr.obs[OBS_TARGET].astype(str).reindex(guides.obs_names).to_numpy()
         if OBS_TARGET in expr.obs.columns
         else np.array(["NA"] * guides.n_obs)
     )
     table["assignment"] = assignment[coo.row]
-
     # Highest count last within each cell (see docstring).
     table = table.sort_values(["cell", "umi_count"], ascending=[True, True])
-
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(path, sep="\t", index=False)
@@ -840,9 +698,7 @@ def read_sample_metadata(path: str, key_column: str) -> pd.DataFrame:
     return meta
 
 
-def merge_guides_into_expr(
-    expr: ad.AnnData, guides: Optional[ad.AnnData], cfg: Config
-) -> ad.AnnData:
+def merge_guides_into_expr(expr: ad.AnnData, guides: Optional[ad.AnnData], cfg: Config) -> ad.AnnData:
     """Store the guide count matrix inside the expression object.
 
     Kept in ``obsm`` rather than concatenated onto ``var``: guide counts are not
@@ -858,16 +714,13 @@ def merge_guides_into_expr(
 
     if guides is None or not cfg.output.merge_guides_into_h5ad:
         return expr
-
     aligned = guides[expr.obs_names]
     X = aligned.layers["counts"] if "counts" in aligned.layers else aligned.X
     key = cfg.output.guide_obsm_key
     expr.obsm[key] = sparse.csr_matrix(X)
     expr.uns["guide_names"] = np.asarray(aligned.var_names.astype(str), dtype=object)
     if "target_gene" in aligned.var.columns:
-        expr.uns["guide_target_genes"] = np.asarray(
-            aligned.var["target_gene"].astype(str), dtype=object
-        )
+        expr.uns["guide_target_genes"] = np.asarray(aligned.var["target_gene"].astype(str), dtype=object)
     _scol = cfg.guides.scaffold_column if cfg.guides.scaffold_column != "auto" else "scaffold"
     _pcol = cfg.guides.pair_id_column if cfg.guides.pair_id_column != "auto" else "pair_id"
     for var_col, uns_key in (
@@ -877,9 +730,7 @@ def merge_guides_into_expr(
     ):
         if var_col in aligned.var.columns:
             expr.uns[uns_key] = np.asarray(aligned.var[var_col].astype(str), dtype=object)
-    logger.info(
-        "Merged the guide matrix into obsm[%r] (%d guides)", key, aligned.n_vars
-    )
+    logger.info("Merged the guide matrix into obsm[%r] (%d guides)", key, aligned.n_vars)
     return expr
 
 
@@ -962,7 +813,11 @@ def sanitize_h5ad_names(adata: ad.AnnData) -> List[Dict[str, str]]:
     if records:
         prev = adata.uns.get("column_name_mapping")
         merged = (list(prev) if isinstance(prev, list) else []) + records
-        adata.uns["column_name_mapping"] = {"location": [r["location"] for r in merged], "original": [r["original"] for r in merged], "sanitized": [r["sanitized"] for r in merged]}
+        adata.uns["column_name_mapping"] = {
+            "location": [r["location"] for r in merged],
+            "original": [r["original"] for r in merged],
+            "sanitized": [r["sanitized"] for r in merged],
+        }
     return records
 
 
@@ -977,17 +832,14 @@ def write_h5ad(adata: ad.AnnData, path: Path, compression: str = "gzip") -> Path
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-
     # Sanitize in place rather than copying: an .h5ad of this size would
     # otherwise double peak memory just to fix a few column dtypes.
     for col in adata.obs.columns:
         if adata.obs[col].dtype == object:
             adata.obs[col] = pd.Categorical(adata.obs[col].astype(str))
-
     for col in adata.var.columns:
         if adata.var[col].dtype == object:
             adata.var[col] = adata.var[col].astype(str)
-
     # HDF5-safe names: obs / var column names and uns keys derived from biological
     # target labels (e.g. ``lochness_LIPA (rs1412444)``, ``ps_score_FHL3 (rs114296424)``)
     # may carry characters that are illegal or fragile as HDF5 dataset / group names
@@ -998,15 +850,16 @@ def write_h5ad(adata: ad.AnnData, path: Path, compression: str = "gzip") -> Path
     mapping = sanitize_h5ad_names(adata)
     if mapping:
         pd.DataFrame(mapping).to_csv(path.with_name(path.stem + "_column_name_mapping.csv"), index=False)
-        logger.info("Sanitised %d HDF5-unsafe name(s); mapping written to %s", len(mapping), path.with_name(path.stem + "_column_name_mapping.csv"))
-
+        logger.info(
+            "Sanitised %d HDF5-unsafe name(s); mapping written to %s",
+            len(mapping),
+            path.with_name(path.stem + "_column_name_mapping.csv"),
+        )
     # anndata >= 0.11 may represent dataframe indices/columns with the pandas
     # nullable StringDtype. Writing those requires explicit opt-in.
     if hasattr(ad.settings, "allow_write_nullable_strings"):
         ad.settings.allow_write_nullable_strings = True
-
     adata.write_h5ad(path, compression=compression)
-
     logger.info("Wrote %s (%.1f MB)", path, path.stat().st_size / 1e6)
     return path
 
@@ -1021,7 +874,6 @@ def archive_results(outdir: Path, cfg: Config) -> Optional[Path]:
     """
     if not cfg.output.archive:
         return None
-
     import fnmatch
     import tarfile
 
@@ -1030,14 +882,11 @@ def archive_results(outdir: Path, cfg: Config) -> Optional[Path]:
     if not name.endswith((".tar.gz", ".tgz")):
         name += ".tar.gz"
     dest = outdir / name
-
     patterns = list(cfg.output.archive_exclude or [])
 
     def excluded(rel: Path) -> bool:
         text = str(rel)
-        return any(
-            fnmatch.fnmatch(text, p) or fnmatch.fnmatch(rel.name, p) for p in patterns
-        )
+        return any(fnmatch.fnmatch(text, p) or fnmatch.fnmatch(rel.name, p) for p in patterns)
 
     members: List[Path] = []
     skipped: List[Path] = []
@@ -1050,11 +899,9 @@ def archive_results(outdir: Path, cfg: Config) -> Optional[Path]:
             skipped.append(rel)
             continue
         members.append(path)
-
     if not members:
         logger.warning("Nothing to archive in %s", outdir)
         return None
-
     # Write to a temporary name first so a partial archive is never left behind
     # and cannot be picked up by the walk above.
     tmp = dest.with_suffix(dest.suffix + ".partial")
@@ -1067,7 +914,6 @@ def archive_results(outdir: Path, cfg: Config) -> Optional[Path]:
     finally:
         if tmp.exists():
             tmp.unlink()
-
     size_mb = dest.stat().st_size / 1e6
     logger.info(
         "Archived %d file(s) to %s (%.1f MB); excluded %d matching %s",
@@ -1106,9 +952,7 @@ def relocate_if_large(path: Path, cfg: Config) -> Path:
     return dest
 
 
-# ---------------------------------------------------------------------------
 # Native 10x HDF5 loading (basic QC stage)
-# ---------------------------------------------------------------------------
 
 #: ``obs`` column preserving the original 10x cell barcode.
 
@@ -1121,9 +965,7 @@ def _to_int_csr(X, what: str):
     data = X.data
     if data.size and not np.issubdtype(data.dtype, np.integer):
         if not np.all(np.mod(data, 1) == 0):
-            raise ValueError(
-                f"{what}: matrix holds non-integer values; expected raw counts"
-            )
+            raise ValueError(f"{what}: matrix holds non-integer values; expected raw counts")
         if data.size and data.max() < np.iinfo(np.int32).max:
             X = sp.csr_matrix((data.astype(np.int32), X.indices, X.indptr), shape=X.shape)
         else:
@@ -1186,7 +1028,11 @@ def read_10x_h5(
     adata.uns["source_path"] = str(path)
     logger.info(
         "%s: loaded %d cells x %d genes from %s (%d features in file)",
-        sample_id, adata.n_obs, adata.n_vars, path.name, n_features_total,
+        sample_id,
+        adata.n_obs,
+        adata.n_vars,
+        path.name,
+        n_features_total,
     )
     return adata
 
